@@ -55,6 +55,32 @@ Decision 经过 Risk Gate
 
 ### 2.1 MVP 验收命令
 
+Phase 1.5 以后默认验收命令为：
+
+```bash
+python scripts/run_acceptance.py
+```
+
+默认命令只执行 core acceptance，不运行全仓库测试，不把严格环境检查作为阻塞项。
+
+可选全仓库测试：
+
+```bash
+python scripts/run_acceptance.py --full-tests
+```
+
+该命令会额外执行 `python -m pytest tests`，用于观察既有 daily_stock_analysis 测试状态，不作为 Phase 1.5 默认阻塞项。
+
+可选严格环境检查：
+
+```bash
+python scripts/run_acceptance.py --strict-env
+```
+
+该命令会把 `python -m pip check` 失败作为阻塞项。当前 `mootdx/httpx` 版本约束风险详见 `docs/ENVIRONMENT.md`。
+
+原始 Mock MVP 命令仍可单独运行：
+
 ```bash
 python scripts/run_stock_report.py \
   --stocks 600519,000001,300750 \
@@ -114,7 +140,9 @@ paper_nav
 [ ] private_ext 目录存在
 [ ] scripts/run_stock_report.py 存在
 [ ] scripts/inspect_db.py 存在
-[ ] python -m pytest tests 成功
+[ ] python scripts/run_acceptance.py 成功
+[ ] python scripts/run_acceptance.py --full-tests 可用于观察全仓库测试
+[ ] python scripts/run_acceptance.py --strict-env 可用于严格环境检查
 [ ] Mock MVP 命令成功
 [ ] storage/research.sqlite 存在
 [ ] storage/fact_packs 至少 3 个 JSON
@@ -129,4 +157,3 @@ paper_nav
 [ ] 没有接入实盘
 [ ] 没有破坏 daily_stock_analysis 原有结构
 ```
-

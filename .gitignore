@@ -63,6 +63,17 @@ reports/
 *.sqlite
 *.sqlite3
 
+# Phase 1.5 runtime outputs
+!storage/
+!storage/**/
+storage/*.sqlite
+storage/**/*.json
+storage/**/*.md
+storage/**/*.log
+storage/**/*.parquet
+storage/**/*.csv
+!storage/**/.gitkeep
+
 # 系统文件
 .DS_Store
 Thumbs.db
