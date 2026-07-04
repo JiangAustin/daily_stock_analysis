@@ -4,6 +4,194 @@
 
 如果本文件与仓库中的脚本、工作流、代码现状不一致，以实际可执行内容为准，并在相关改动中顺手修正文档，避免规则继续漂移。
 
+## 项目名称
+
+ashare-research-os
+
+## 项目定位
+
+本项目基于 daily_stock_analysis 扩展，目标不是重新做一个股票前端，也不是做实盘交易机器人，而是构建一个 A股 AI 投研决策流水线。
+
+核心链路为：
+
+Raw Data
+→ Fact Pack
+→ Scorecard
+→ Investment Decision
+→ Structured Report
+→ Paper Trading
+→ Review / Evaluation
+
+## 最重要原则
+
+Codex 必须优先保持 daily_stock_analysis 原项目稳定。
+
+新增功能优先放入：
+
+`private_ext/`
+
+新增命令行脚本放入：
+
+`scripts/`
+
+新增数据和报告放入：
+
+`storage/`
+
+除非明确要求，不要大规模重构 daily_stock_analysis 原有代码。
+
+## 第一阶段目标
+
+第一阶段只做 Mock MVP 闭环：
+
+1. 输入股票池
+2. 生成 Mock Raw Data
+3. Raw Data 转成 Fact Pack
+4. Fact Pack 转成 Scorecard
+5. Scorecard 转成 Investment Decision
+6. 生成结构化 Markdown 报告
+7. 写入 SQLite
+8. 可选接入模拟交易
+9. 生成日志
+
+第一阶段不接真实行情、不接真实 LLM、不接 TradingAgents-astock、不接实盘交易、不做前端。
+
+## MVP 唯一验收命令
+
+```bash
+python scripts/run_stock_report.py \
+  --stocks 600519,000001,300750 \
+  --date 2026-07-03 \
+  --raw-data mock \
+  --research-adapter mock \
+  --paper-trading on
+```
+
+运行成功后必须生成：
+
+```text
+storage/research.sqlite
+
+storage/fact_packs/600519_2026-07-03.json
+storage/fact_packs/000001_2026-07-03.json
+storage/fact_packs/300750_2026-07-03.json
+
+storage/scorecards/600519_2026-07-03.json
+storage/scorecards/000001_2026-07-03.json
+storage/scorecards/300750_2026-07-03.json
+
+storage/reports/stock_report_600519_2026-07-03.md
+storage/reports/stock_report_000001_2026-07-03.md
+storage/reports/stock_report_300750_2026-07-03.md
+
+storage/logs/run_stock_report_2026-07-03.log
+```
+
+SQLite 中至少包含：
+
+```text
+research_runs: 3
+raw_data_snapshots: 3
+fact_packs: 3
+scorecards: 3
+research_decisions: 3
+paper_trade_signals: 3
+paper_nav: 1
+```
+
+## 最高优先级
+
+1. 跑通命令行主流程
+2. Mock 数据闭环
+3. SQLite 初始化和写入
+4. Fact Pack Builder
+5. Score Engine
+6. Decision Engine
+7. Risk Gate
+8. Markdown Report Renderer
+9. Paper Trading
+10. 基础测试
+11. 日志和错误处理
+12. 后续才允许接真实数据、LLM、TradingAgents、推送和前端
+
+## 严禁事项
+
+在 MVP 验收命令跑通之前，禁止：
+
+- 禁止开发前端页面
+- 禁止修改 Web UI
+- 禁止引入 React、Vue、Next.js、Streamlit、Gradio
+- 禁止开发桌面端
+- 禁止接入真实券商下单
+- 禁止保存真实券商账号、密码、验证码、Cookie
+- 禁止实现自动实盘交易
+- 禁止全市场批量跑 LLM Agent
+- 禁止一开始引入 PostgreSQL、Redis、Celery、Kafka、Airflow
+- 禁止跳过 Fact Pack 直接让 LLM 给 Buy/Sell
+- 禁止跳过 Scorecard 直接生成交易建议
+- 禁止只保存最终结论而不保存原始数据和原始输出
+- 禁止为了代码优雅大规模重构原项目
+- 禁止把所有逻辑塞进一个大文件
+
+## 核心架构约束
+
+必须按以下层级实现：
+
+```text
+Raw Data Collector
+  ↓
+Fact Pack Builder
+  ↓
+Score Engine
+  ↓
+Research Adapter
+  ↓
+Decision Engine
+  ↓
+Risk Gate
+  ↓
+Structured Report
+  ↓
+Paper Trading
+  ↓
+Evaluation
+```
+
+其中：
+
+- Raw Data 只负责采集原始数据，不做判断。
+- Fact Pack 只负责把原始数据压缩成结构化事实。
+- Scorecard 只负责分项评分。
+- Decision Engine 才能给出投资观点。
+- Risk Gate 决定观点是否能进入模拟交易。
+- Report 必须写清楚事实、评分、判断、风险、失效条件。
+- Paper Trading 只能模拟，不能实盘。
+- Evaluation 后续用于复盘 AI 判断质量。
+
+## 推荐技术选择
+
+第一阶段使用：
+
+```text
+Python 3.10+
+SQLite
+Pydantic
+Markdown
+pytest
+```
+
+第一阶段不使用：
+
+```text
+PostgreSQL
+Redis
+Celery
+Kafka
+Airflow
+复杂 Web 框架
+真实券商接口
+```
+
 ## 1. 硬规则
 
 - 遵循现有目录边界：
