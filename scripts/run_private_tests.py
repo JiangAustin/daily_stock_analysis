@@ -18,6 +18,7 @@ PRIVATE_TEST_FILES = [
     "tests/test_phase15_stability.py",
     "tests/test_akshare_collector_mapping.py",
     "tests/test_akshare_fallbacks.py",
+    "tests/test_akshare_kline.py",
     "tests/test_raw_data_quality.py",
     "tests/test_raw_data_cache.py",
     "tests/test_source_level_cache.py",

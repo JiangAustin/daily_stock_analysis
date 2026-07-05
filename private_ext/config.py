@@ -6,6 +6,10 @@ from pydantic import BaseModel
 class Settings(BaseModel):
     storage_dir: Path = Path("storage")
     db_path: Path = Path("storage/research.sqlite")
+    runs_dir: Path = Path("storage/runs")
+    latest_mock_mvp_dir: Path = Path("storage/latest_mock_mvp")
+    latest_realdata_smoke_dir: Path = Path("storage/latest_realdata_smoke")
+    latest_manual_dir: Path = Path("storage/latest_manual")
     raw_dir: Path = Path("storage/raw")
     raw_cache_dir: Path = Path("storage/raw_cache")
     fact_pack_dir: Path = Path("storage/fact_packs")

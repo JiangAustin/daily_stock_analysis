@@ -4,7 +4,9 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
+import shutil
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -33,7 +35,12 @@ def main() -> int:
     _ensure_dirs()
     init_db(settings)
     repo = ResearchRepository(settings.db_path)
-    logger = setup_run_logger(settings.logs_dir, args.trade_date)
+    run_mode = _resolve_run_mode(args.raw_data, args.research_adapter, args.run_mode)
+    file_run_id = _build_file_run_id(args.trade_date, args.raw_data, args.research_adapter, run_mode)
+    run_dir = settings.runs_dir / file_run_id
+    latest_dir = _latest_dir_for_mode(run_mode)
+    run_paths = _build_run_paths(run_dir, latest_dir, args.trade_date)
+    logger = setup_run_logger(run_paths["run_log"])
 
     try:
         collector = create_raw_data_collector(
@@ -57,20 +64,59 @@ def main() -> int:
     reports = []
     failures = []
     for symbol in stocks:
-        run_id = repo.create_run(args.trade_date, symbol, collector.provider, research_adapter.adapter)
+        run_id = repo.create_run(
+            args.trade_date,
+            symbol,
+            collector.provider,
+            research_adapter.adapter,
+            run_mode=run_mode,
+            file_run_id=file_run_id,
+            run_dir=str(run_dir),
+        )
         logger.info("start symbol=%s run_id=%s", symbol, run_id)
         try:
             raw = collector.collect(symbol, args.trade_date)
+            raw.metadata = {
+                **(raw.metadata or {}),
+                "run_mode": run_mode,
+                "file_run_id": file_run_id,
+                "run_dir": str(run_dir),
+                "research_adapter": research_adapter.adapter,
+            }
             repo.save_raw_data(run_id, raw, collector.provider)
-            _write_json(settings.raw_dir / f"{symbol}_{args.trade_date}.json", raw.model_dump(mode="json"))
+            raw_path = run_paths["raw_dir"] / f"{symbol}_{args.trade_date}.json"
+            latest_raw_path = run_paths["latest_raw_dir"] / f"{symbol}_{args.trade_date}.json"
+            _write_json(raw_path, raw.model_dump(mode="json"))
+            _write_json(latest_raw_path, raw.model_dump(mode="json"))
 
             fact_pack = fact_builder.build(raw)
+            fact_pack.metadata = {
+                **(fact_pack.metadata or {}),
+                "run_mode": run_mode,
+                "file_run_id": file_run_id,
+                "run_dir": str(run_dir),
+                "research_adapter": research_adapter.adapter,
+            }
             repo.save_fact_pack(run_id, fact_pack)
-            _write_json(settings.fact_pack_dir / f"{symbol}_{args.trade_date}.json", fact_pack.model_dump(mode="json"))
+            fact_pack_path = run_paths["fact_pack_dir"] / f"{symbol}_{args.trade_date}.json"
+            latest_fact_pack_path = run_paths["latest_fact_pack_dir"] / f"{symbol}_{args.trade_date}.json"
+            _write_json(fact_pack_path, fact_pack.model_dump(mode="json"))
+            _write_json(latest_fact_pack_path, fact_pack.model_dump(mode="json"))
 
             scorecard = score_engine.score(fact_pack)
+            scorecard.metadata = {
+                **(scorecard.metadata or {}),
+                "run_mode": run_mode,
+                "file_run_id": file_run_id,
+                "run_dir": str(run_dir),
+                "research_adapter": research_adapter.adapter,
+                "raw_data_provider": collector.provider,
+            }
             repo.save_scorecard(run_id, scorecard)
-            _write_json(settings.scorecard_dir / f"{symbol}_{args.trade_date}.json", scorecard.model_dump(mode="json"))
+            scorecard_path = run_paths["scorecard_dir"] / f"{symbol}_{args.trade_date}.json"
+            latest_scorecard_path = run_paths["latest_scorecard_dir"] / f"{symbol}_{args.trade_date}.json"
+            _write_json(scorecard_path, scorecard.model_dump(mode="json"))
+            _write_json(latest_scorecard_path, scorecard.model_dump(mode="json"))
 
             research_output = research_adapter.analyze(fact_pack, scorecard)
             repo.save_research_output(run_id, research_output)
@@ -91,7 +137,10 @@ def main() -> int:
                     executed=False,
                     reason="paper trading off",
                 )
-            report_path = render_stock_report(fact_pack, scorecard, decision, execution, settings.reports_dir)
+            report_path = render_stock_report(fact_pack, scorecard, decision, execution, run_paths["reports_dir"])
+            latest_report_path = run_paths["latest_reports_dir"] / report_path.name
+            latest_report_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(report_path, latest_report_path)
             reports.append(report_path)
             repo.finish_run(run_id)
             logger.info("completed symbol=%s report=%s", symbol, report_path)
@@ -104,16 +153,39 @@ def main() -> int:
     if args.paper_trading == "on":
         paper_broker.mark_to_market(args.trade_date)
 
+    _copy_log_to_latest(run_paths["run_log"], run_paths["latest_log"])
+
     if not reports:
         print("Stock report run failed for all requested stocks.")
         for symbol, error in failures:
             print(f"- {symbol}: {error}")
         return 1
 
-    print("Stock report MVP completed.")
+    summary = {
+        "run_id": file_run_id,
+        "run_mode": run_mode,
+        "run_dir": str(run_dir),
+        "raw_data": collector.provider,
+        "research_adapter": research_adapter.adapter,
+        "reports": [str(path) for path in reports],
+        "database": str(settings.db_path),
+        "date": args.trade_date,
+        "stocks": stocks,
+        "failures": failures,
+    }
+    if args.print_json_summary:
+        print(json.dumps(summary, ensure_ascii=False, indent=2))
+        return 0
+
+    print("Stock report run completed.")
     print(f"Date: {args.trade_date}")
+    print(f"Run mode: {run_mode}")
+    print(f"Raw data: {collector.provider}")
+    print(f"Research adapter: {research_adapter.adapter}")
+    print(f"Run ID: {file_run_id}")
+    print(f"Run directory: {run_dir}")
     print(f"Stocks: {','.join(stocks)}")
-    print(f"Reports: {settings.reports_dir}/")
+    print(f"Reports: {run_paths['reports_dir']}/")
     print(f"Database: {settings.db_path}")
     if failures:
         print("Failed Stocks:")
@@ -130,12 +202,18 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--research-adapter", default=settings.default_research_adapter)
     parser.add_argument("--paper-trading", choices=["on", "off"], default="on")
     parser.add_argument("--refresh-data", action="store_true")
+    parser.add_argument("--run-mode", choices=["mock_mvp", "realdata_smoke", "manual"])
+    parser.add_argument("--print-json-summary", action="store_true")
     return parser.parse_args()
 
 
 def _ensure_dirs() -> None:
     for path in (
         settings.storage_dir,
+        settings.runs_dir,
+        settings.latest_mock_mvp_dir,
+        settings.latest_realdata_smoke_dir,
+        settings.latest_manual_dir,
         settings.raw_dir,
         settings.raw_cache_dir,
         settings.fact_pack_dir,
@@ -150,6 +228,54 @@ def _ensure_dirs() -> None:
 def _write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def _resolve_run_mode(raw_data: str, research_adapter: str, explicit_run_mode: str | None) -> str:
+    if explicit_run_mode:
+        return explicit_run_mode
+    if raw_data == "mock" and research_adapter == "mock":
+        return "mock_mvp"
+    if raw_data == "akshare":
+        return "realdata_smoke"
+    return "manual"
+
+
+def _build_file_run_id(trade_date: str, raw_data: str, research_adapter: str, run_mode: str) -> str:
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    return f"{trade_date}_{raw_data}_{research_adapter}_{run_mode}_{timestamp}"
+
+
+def _latest_dir_for_mode(run_mode: str) -> Path:
+    if run_mode == "mock_mvp":
+        return settings.latest_mock_mvp_dir
+    if run_mode == "realdata_smoke":
+        return settings.latest_realdata_smoke_dir
+    return settings.latest_manual_dir
+
+
+def _build_run_paths(run_dir: Path, latest_dir: Path, trade_date: str) -> dict[str, Path]:
+    return {
+        "run_dir": run_dir,
+        "raw_dir": run_dir / "raw",
+        "fact_pack_dir": run_dir / "fact_packs",
+        "scorecard_dir": run_dir / "scorecards",
+        "reports_dir": run_dir / "reports",
+        "logs_dir": run_dir / "logs",
+        "run_log": run_dir / "logs" / f"run_stock_report_{trade_date}.log",
+        "latest_raw_dir": latest_dir / "raw",
+        "latest_fact_pack_dir": latest_dir / "fact_packs",
+        "latest_scorecard_dir": latest_dir / "scorecards",
+        "latest_reports_dir": latest_dir / "reports",
+        "latest_logs_dir": latest_dir / "logs",
+        "latest_log": latest_dir / "logs" / f"run_stock_report_{trade_date}.log",
+    }
+
+
+def _copy_log_to_latest(run_log: Path, latest_log: Path) -> None:
+    if not run_log.exists():
+        return
+    latest_log.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(run_log, latest_log)
 
 
 if __name__ == "__main__":

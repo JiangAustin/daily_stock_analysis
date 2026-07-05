@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 import math
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Callable
 
 try:
@@ -20,6 +20,7 @@ from private_ext.raw_data.akshare_fallbacks import (
     fill_valuation,
     summarize_field_provenance,
 )
+from private_ext.raw_data.akshare_kline import fetch_hist_kline_with_fallbacks
 from private_ext.raw_data.cache import RawDataCache
 from private_ext.raw_data.models import RawStockData
 from private_ext.raw_data.quality import CRITICAL_FIELDS, build_quality_report
@@ -55,11 +56,6 @@ class AkShareRawDataCollector(RawDataCollector):
                 return cached
 
         market = _infer_market(normalized_symbol)
-        trade_date_compact = trade_date.replace("-", "")
-        start_date = (
-            datetime.strptime(trade_date, "%Y-%m-%d") - timedelta(days=150)
-        ).strftime("%Y%m%d")
-
         warnings: list[str] = []
         payloads: dict[str, Any] = {}
         failed_sources: list[str] = []
@@ -114,15 +110,18 @@ class AkShareRawDataCollector(RawDataCollector):
 
         info_records = safe_call("stock_individual_info_em", ak.stock_individual_info_em, symbol=normalized_symbol)
         spot_records = safe_call("stock_zh_a_spot_em", ak.stock_zh_a_spot_em)
-        hist_records = safe_call(
-            "stock_zh_a_hist",
-            ak.stock_zh_a_hist,
+        hist_fetch = fetch_hist_kline_with_fallbacks(
             symbol=normalized_symbol,
-            period="daily",
-            start_date=start_date,
-            end_date=trade_date_compact,
-            adjust="qfq",
+            requested_date=trade_date,
+            safe_call=safe_call,
+            ak_client=ak,
         )
+        hist_records = hist_fetch["records"]
+        warnings.extend(hist_fetch.get("warnings", []))
+        failed_sources.extend(hist_fetch.get("failed_sources", []))
+        successful_sources.extend(hist_fetch.get("successful_sources", []))
+        if hist_fetch.get("raw"):
+            payloads["stock_zh_a_hist_candidates"] = hist_fetch["raw"]
         financial_records = safe_call(
             "stock_financial_analysis_indicator",
             ak.stock_financial_analysis_indicator,
@@ -256,6 +255,7 @@ class AkShareRawDataCollector(RawDataCollector):
 
         actual_data_date = _first_non_empty(
             [
+                _normalize_date(kline_summary.get("actual_data_date")),
                 _normalize_date(_first_present(hist_records[-1], ["日期"])) if hist_records else None,
                 northbound_raw.get("trade_date"),
                 _normalize_date(_first_present(latest_financial, ["日期"])),

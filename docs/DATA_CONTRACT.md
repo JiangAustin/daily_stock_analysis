@@ -14,7 +14,7 @@
 - `trade_date: str`：交易日期，格式为 `YYYY-MM-DD`。
 - `basic_info: dict`：公司基础信息，如名称、行业、市场。
 - `market_snapshot: dict`：收盘价、币种、涨跌幅等行情快照。
-- `kline_summary: dict`：趋势、均线、波动率等 K 线摘要。
+- `kline_summary: dict`：趋势、均线、波动率、`return_5d/20d/60d`、`actual_data_date` 等 K 线摘要。
 - `valuation_raw: dict`：PE、PB、股息率等原始估值数据。
 - `financial_raw: dict`：ROE、毛利率、净利率、营收增长、利润增长等财务数据。
 - `capital_flow_raw: dict`：主力净流入等资金面数据。
@@ -35,6 +35,9 @@
 - `metadata` 中允许包含 `quality_report`，用于描述 `requested_date`、`actual_data_date`、覆盖率、失败数据源和是否允许评分/决策。
 - `metadata.field_provenance` 用于记录关键字段的来源、fallback 层级、是否来自缓存以及置信等级。
 - `metadata.source_cache_used` 用于记录哪些上游 source 使用了 source-level cache。
+- `market_snapshot.close`、`market_snapshot.pct_change`、`kline_summary.return_20d` 属于行情核心字段。
+- `requested_date` 与 `actual_data_date` 允许不一致；真实 Provider 不得假设请求日一定可交易或一定可查。
+- `metadata.run_mode`、`metadata.file_run_id`、`metadata.run_dir` 用于保留文件系统级运行证据，不依赖 SQLite 自增 id。
 
 ## StockFactPack
 
@@ -68,6 +71,7 @@
 - FactPackBuilder 必须兼容真实数据 Provider 的部分缺失、空 dict、空 list 和 `None` 风险输入。
 - FactPackBuilder 应把 `RawDataQualityReport` 继续传递为下游可消费的质量元信息。
 - FactPackBuilder 应保留 `field_provenance`、`source_cache_used` 和 live/cache 计数，供报告和健康检查使用。
+- 当 `actual_data_date != requested_date` 时，Fact Pack 和报告层应继续透传该差异，而不是静默覆盖。
 
 ## StockScorecard
 
@@ -99,6 +103,7 @@
 - ScoreEngine 必须能处理缺失字段；字段不足时给中性或保守分，并把保守处理写进 `score_explanations` 与 `penalty_reasons`。
 - `degraded` 数据总分上限应低于 `good`，`poor` / `failed` 数据不得产生误导性的强评分。
 - 非核心缺失如公告、新闻、次级资金流不应被当作核心失败处理；总分惩罚应轻于核心市场/估值/财务字段缺失。
+- K 线收益率按小数语义传递，例如 `0.12` 表示 `12%`，不使用字符串百分比。
 
 ## InvestmentDecision
 

@@ -6,6 +6,11 @@ from private_ext.research.models import ResearchOutput
 from private_ext.scoring.models import StockScorecard
 from private_ext.scoring.total import ScoreEngine
 
+import pytest
+
+
+pytestmark = pytest.mark.private_ext
+
 
 def _fact_pack(quality_level: str, coverage: float, can_make_decision: bool) -> StockFactPack:
     return StockFactPack(
@@ -86,3 +91,56 @@ def test_poor_quality_disallows_buy_after_decision_and_risk_gate():
     assert decision.action in {"watch", "hold"}
     assert gated.action in {"watch", "hold"}
     assert "真实数据质量不足" in (gated.risk_gate_reason or "")
+
+
+def test_quality_not_directly_poor_when_pe_pb_missing_but_close_and_return20d_exist():
+    from private_ext.raw_data.quality import build_quality_report
+
+    report = build_quality_report(
+        symbol="600519",
+        requested_date="2026-07-03",
+        provider="akshare",
+        actual_data_date="2026-07-03",
+        field_values={
+            "market_snapshot.close": 1500.0,
+            "market_snapshot.pct_change": None,
+            "valuation_raw.pe": None,
+            "valuation_raw.pb": None,
+            "financial_raw.roe": 27.0,
+            "financial_raw.net_profit_growth": 14.0,
+            "kline_summary.return_20d": 0.12,
+        },
+        warnings=[],
+        failed_sources=[],
+        successful_sources=["stock_zh_a_hist", "stock_financial_analysis_indicator"],
+    )
+
+    assert report.quality_level == "degraded"
+    assert report.can_score is True
+
+
+def test_close_missing_disables_decision_even_when_return20d_exists():
+    from private_ext.raw_data.quality import build_quality_report
+
+    report = build_quality_report(
+        symbol="300750",
+        requested_date="2026-07-03",
+        provider="akshare",
+        actual_data_date="2026-07-03",
+        field_values={
+            "market_snapshot.close": None,
+            "market_snapshot.pct_change": 0.03,
+            "valuation_raw.pe": None,
+            "valuation_raw.pb": None,
+            "financial_raw.roe": None,
+            "financial_raw.net_profit_growth": None,
+            "kline_summary.return_20d": 0.18,
+        },
+        warnings=[],
+        failed_sources=[],
+        successful_sources=["stock_zh_a_hist"],
+    )
+
+    assert report.can_score is True
+    assert report.can_make_decision is False
+    assert report.quality_level == "degraded"

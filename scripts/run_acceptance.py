@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -40,26 +42,29 @@ REPORT_COMMAND = [
     "mock",
     "--paper-trading",
     "on",
+    "--run-mode",
+    "mock_mvp",
 ]
 
 STABLE_OUTPUTS = [
-    "storage/raw/000001_2026-07-03.json",
-    "storage/raw/300750_2026-07-03.json",
-    "storage/raw/600519_2026-07-03.json",
-    "storage/fact_packs/000001_2026-07-03.json",
-    "storage/fact_packs/300750_2026-07-03.json",
-    "storage/fact_packs/600519_2026-07-03.json",
-    "storage/scorecards/000001_2026-07-03.json",
-    "storage/scorecards/300750_2026-07-03.json",
-    "storage/scorecards/600519_2026-07-03.json",
-    "storage/reports/stock_report_000001_2026-07-03.md",
-    "storage/reports/stock_report_300750_2026-07-03.md",
-    "storage/reports/stock_report_600519_2026-07-03.md",
+    "storage/latest_mock_mvp/raw/000001_2026-07-03.json",
+    "storage/latest_mock_mvp/raw/300750_2026-07-03.json",
+    "storage/latest_mock_mvp/raw/600519_2026-07-03.json",
+    "storage/latest_mock_mvp/fact_packs/000001_2026-07-03.json",
+    "storage/latest_mock_mvp/fact_packs/300750_2026-07-03.json",
+    "storage/latest_mock_mvp/fact_packs/600519_2026-07-03.json",
+    "storage/latest_mock_mvp/scorecards/000001_2026-07-03.json",
+    "storage/latest_mock_mvp/scorecards/300750_2026-07-03.json",
+    "storage/latest_mock_mvp/scorecards/600519_2026-07-03.json",
+    "storage/latest_mock_mvp/reports/stock_report_000001_2026-07-03.md",
+    "storage/latest_mock_mvp/reports/stock_report_300750_2026-07-03.md",
+    "storage/latest_mock_mvp/reports/stock_report_600519_2026-07-03.md",
 ]
 
 KNOWN_MOOTDX_HTTPX_CONFLICT = (
     "mootdx 0.11.7 has requirement httpx<0.26.0,>=0.25.0"
 )
+VOLATILE_METADATA_KEYS = {"file_run_id", "run_dir"}
 
 
 @dataclass
@@ -93,13 +98,40 @@ def clean_stable_outputs() -> None:
             path.unlink()
 
 
+def _strip_volatile_metadata(value: object) -> object:
+    if isinstance(value, dict):
+        return {
+            key: _strip_volatile_metadata(item)
+            for key, item in value.items()
+            if key not in VOLATILE_METADATA_KEYS
+        }
+    if isinstance(value, list):
+        return [_strip_volatile_metadata(item) for item in value]
+    return value
+
+
+def _normalize_markdown(content: str) -> str:
+    content = re.sub(r"(\| Run ID \| ).*", r"\1<normalized> |", content)
+    content = re.sub(r"(\| Run Directory \| ).*", r"\1<normalized> |", content)
+    return content
+
+
+def stable_file_bytes(path: Path) -> bytes:
+    if path.suffix == ".json":
+        normalized = _strip_volatile_metadata(json.loads(path.read_text()))
+        return json.dumps(normalized, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    if path.suffix == ".md":
+        return _normalize_markdown(path.read_text()).encode("utf-8")
+    return path.read_bytes()
+
+
 def hash_stable_outputs() -> dict[str, str]:
     digests: dict[str, str] = {}
     for relative_path in STABLE_OUTPUTS:
         path = ROOT / relative_path
         if not path.exists():
             raise FileNotFoundError(f"Missing deterministic output: {relative_path}")
-        digests[relative_path] = hashlib.sha256(path.read_bytes()).hexdigest()
+        digests[relative_path] = hashlib.sha256(stable_file_bytes(path)).hexdigest()
     return digests
 
 
@@ -132,11 +164,11 @@ def verify_gitignore() -> CheckResult:
     print("\n==> storage gitignore check")
     ignored_paths = [
         "storage/research.sqlite",
-        "storage/raw/600519_2026-07-03.json",
-        "storage/fact_packs/600519_2026-07-03.json",
-        "storage/scorecards/600519_2026-07-03.json",
-        "storage/reports/stock_report_600519_2026-07-03.md",
-        "storage/logs/run_stock_report_2026-07-03.log",
+        "storage/latest_mock_mvp/raw/600519_2026-07-03.json",
+        "storage/latest_mock_mvp/fact_packs/600519_2026-07-03.json",
+        "storage/latest_mock_mvp/scorecards/600519_2026-07-03.json",
+        "storage/latest_mock_mvp/reports/stock_report_600519_2026-07-03.md",
+        "storage/latest_mock_mvp/logs/run_stock_report_2026-07-03.log",
     ]
     visible_gitkeep_paths = [
         "storage/.gitkeep",
@@ -248,6 +280,8 @@ def print_summary(results: list[CheckResult], full_tests_requested: bool) -> Non
         if result:
             detail = f" ({result.detail})" if result.detail else ""
             print(f"{name}: {result.status}{detail}")
+            if name == "MOCK MVP" and result.status == "PASS":
+                print("MOCK RUN DIR: storage/latest_mock_mvp")
 
     full_tests = by_name.get("FULL TESTS")
     if full_tests:

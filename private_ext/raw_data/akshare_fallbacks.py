@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from private_ext.raw_data.akshare_kline import compute_kline_returns
+
 
 KEY_FIELDS = [
     "market_snapshot.close",
@@ -226,7 +228,20 @@ def fill_kline_summary(
     cached_raw: dict[str, Any] | None = None,
     as_float,
 ) -> tuple[dict[str, Any], dict[str, dict[str, Any]], list[str]]:
-    summary, warnings = build_kline_summary(hist_records, as_float=as_float)
+    kline_result = compute_kline_returns(hist_records, as_float=as_float)
+    warnings = list(kline_result.get("warnings", []))
+    summary = {
+        "close_series_length": len([item for item in hist_records if isinstance(item, dict)]),
+        "latest_close": kline_result.get("latest_close"),
+        "latest_pct_change": kline_result.get("latest_pct_change"),
+        "return_5d": kline_result.get("return_5d"),
+        "return_20d": kline_result.get("return_20d"),
+        "return_60d": kline_result.get("return_60d"),
+        "pct_change_5d": kline_result.get("return_5d"),
+        "pct_change_20d": kline_result.get("return_20d"),
+        "pct_change_60d": kline_result.get("return_60d"),
+        "actual_data_date": kline_result.get("actual_data_date"),
+    }
     provenance: dict[str, dict[str, Any]] = {}
     cached_kline = (cached_raw or {}).get("kline_summary", {})
     is_hist_cached = bool(source_context.get("stock_zh_a_hist", {}).get("is_cached"))
@@ -244,12 +259,15 @@ def fill_kline_summary(
             is_cached = value is not None
             confidence = "low" if value is not None else "missing"
             summary[key] = value
+            summary[f"pct_change_{key.split('_')[1]}"] = value
         provenance[f"kline_summary.{key}"] = build_field_provenance(
             source=source,
             fallback_level=fallback_level,
             is_cached=is_cached,
             confidence=confidence,
         )
+    if summary.get("return_20d") is None:
+        warnings.append("return_20d_unavailable_after_hist_fallbacks")
     return summary, provenance, warnings
 
 
@@ -376,69 +394,3 @@ def first_available_value(candidates: list[Any]) -> Any:
             return value
     return None
 
-
-def build_kline_summary(records: list[dict[str, Any]], *, as_float) -> tuple[dict[str, Any], list[str]]:
-    warnings: list[str] = []
-    if not records:
-        return {}, ["kline_history_missing"]
-    closes = [as_float(first_present(item, ["收盘", "收盘价", "close"])) for item in records]
-    closes = [item for item in closes if item is not None]
-    if not closes:
-        return {}, ["kline_close_missing"]
-
-    ma5 = moving_average(closes, 5)
-    ma20 = moving_average(closes, 20)
-    ma60 = moving_average(closes, 60)
-    latest = closes[-1]
-    prev = closes[-2] if len(closes) > 1 else None
-    latest_pct = round((latest / prev - 1) * 100, 2) if prev not in (None, 0) else None
-    daily_returns = []
-    for prev_close, current_close in zip(closes, closes[1:]):
-        if prev_close:
-            daily_returns.append((current_close / prev_close - 1) * 100)
-    volatility = round((sum((item - (sum(daily_returns) / len(daily_returns))) ** 2 for item in daily_returns) / len(daily_returns)) ** 0.5, 2) if len(daily_returns) >= 2 else None
-
-    trend = "sideways"
-    if ma20 is not None and latest > ma20:
-        trend = "up"
-    elif ma20 is not None and latest < ma20:
-        trend = "down"
-
-    return (
-        {
-            "close_series_length": len(closes),
-            "latest_close": latest,
-            "latest_pct_change": latest_pct,
-            "pct_change_5d": window_return(closes, 5),
-            "pct_change_20d": window_return(closes, 20),
-            "pct_change_60d": window_return(closes, 60),
-            "return_5d": window_return(closes, 5),
-            "return_20d": window_return(closes, 20),
-            "return_60d": window_return(closes, 60),
-            "ma5": ma5,
-            "ma20": ma20,
-            "ma60": ma60,
-            "ma5_above_ma20": bool(ma5 is not None and ma20 is not None and ma5 >= ma20),
-            "trend": trend,
-            "volatility": volatility,
-        },
-        warnings,
-    )
-
-
-def moving_average(values: list[float], window: int) -> float | None:
-    if len(values) < window:
-        return None
-    return round(sum(values[-window:]) / window, 4)
-
-
-def window_return(values: list[float], window: int) -> float | None:
-    if len(values) > window:
-        base = values[-window - 1]
-        if base:
-            return round((values[-1] / base - 1) * 100, 2)
-    if len(values) > 1:
-        base = values[0]
-        if base:
-            return round((values[-1] / base - 1) * 100, 2)
-    return None

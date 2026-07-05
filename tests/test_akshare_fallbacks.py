@@ -39,7 +39,7 @@ def test_fill_market_snapshot_falls_back_to_hist_and_cache():
     assert warnings == []
 
 
-def test_fill_kline_summary_uses_short_window_and_preserves_hist_provenance():
+def test_fill_kline_summary_marks_insufficient_return20d_window_and_preserves_hist_provenance():
     records = [
         {"日期": "2026-07-01", "收盘": 10.0},
         {"日期": "2026-07-02", "收盘": 10.5},
@@ -53,10 +53,11 @@ def test_fill_kline_summary_uses_short_window_and_preserves_hist_provenance():
         as_float=_safe_float,
     )
 
-    assert summary["return_20d"] == 10.0
-    assert provenance["kline_summary.return_20d"]["source"] == "stock_zh_a_hist"
-    assert provenance["kline_summary.return_20d"]["fallback_level"] == 0
-    assert warnings == []
+    assert summary["return_5d"] is None
+    assert summary["return_20d"] is None
+    assert provenance["kline_summary.return_20d"]["source"] is None
+    assert provenance["kline_summary.return_20d"]["confidence"] == "missing"
+    assert "return_20d_unavailable_after_hist_fallbacks" in warnings
 
 
 def test_fill_valuation_falls_back_to_info_map_when_spot_missing():

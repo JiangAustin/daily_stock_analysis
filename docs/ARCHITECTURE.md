@@ -22,6 +22,7 @@ Raw Data
 - `private_ext/raw_data/quality.py`：真实数据质量分级、覆盖率和可决策性判定。
 - `private_ext/raw_data/cache.py`：Provider 级 `raw_cache` 与 source-level cache，用于缓存 `akshare` 原始快照并在 live 失败时回退。
 - `private_ext/raw_data/akshare_fallbacks.py`：关键字段 fallback 和字段来源追踪。
+- `private_ext/raw_data/akshare_kline.py`：K 线 symbol 标准化、多参数 fallback、close/pct_change 提取、收益率计算。
 - `private_ext/fact_pack/`：将 Raw Data 归一化为可评分的事实包。
 - `private_ext/scoring/`：把 Fact Pack 转为 StockScorecard。
 - `private_ext/research/`：研究适配器接口与 Mock 研究输出。当前不接真实 LLM。
@@ -63,12 +64,15 @@ python scripts/run_acceptance.py --strict-env
 
 ## 数据落盘
 
-- `storage/raw/`：Mock Raw Data JSON。
-- `storage/raw_cache/`：Provider 原始数据缓存，不替代每次 run 的 `storage/raw/` 快照。
-- `storage/fact_packs/`：StockFactPack JSON。
-- `storage/scorecards/`：StockScorecard JSON。
-- `storage/reports/`：结构化 Markdown 报告。
-- `storage/logs/`：运行日志。
+- `storage/runs/{file_run_id}/raw/`：单次 run 的 Raw Data JSON。
+- `storage/runs/{file_run_id}/fact_packs/`：单次 run 的 StockFactPack JSON。
+- `storage/runs/{file_run_id}/scorecards/`：单次 run 的 StockScorecard JSON。
+- `storage/runs/{file_run_id}/reports/`：单次 run 的结构化 Markdown 报告。
+- `storage/runs/{file_run_id}/logs/`：单次 run 的日志。
+- `storage/latest_mock_mvp/`：最新 mock MVP 指针。
+- `storage/latest_realdata_smoke/`：最新 realdata smoke 指针。
+- `storage/latest_manual/`：最新 manual run 指针。
+- `storage/raw_cache/`：Provider 原始数据缓存，不替代 run 级产物。
 - `storage/research.sqlite`：研究流水线 SQLite Ledger。
 
 上述文件均属于运行产物，默认不入库；目录通过 `.gitkeep` 保留。
@@ -77,11 +81,12 @@ python scripts/run_acceptance.py --strict-env
 
 - 同一股票、同一日期、同一 Mock 配置应生成稳定的 Raw Data、Fact Pack、Scorecard 和 Report 文件。
 - 同一天重复运行允许在 SQLite 中追加 run 记录，但不得崩溃；`scripts/inspect_db.py` 必须能清楚显示 Ledger 记录数量。
-- 报告文件采用固定文件名，重复运行会覆盖同名 Markdown 报告，避免不可控报告堆积。
+- 同一 run 内报告文件采用固定文件名；不同 run 通过 `file_run_id` 隔离，避免 mock acceptance 与 realdata smoke 互相覆盖。
 - 当前阶段不改变 daily_stock_analysis 原 Web / Desktop 逻辑。
 - 真实数据链路需要区分 `requested_date` 与 `actual_data_date`，不能假设第三方接口一定返回请求日数据。
 - 关键字段必须记录 provenance，报告中需要明确哪些字段来自 live source、source cache 或 final raw cache。
 - 单个 source 失败不应直接拖垮整只股票；优先走 source-level cache 和字段级 fallback，再由质量报告决定是否允许决策。
+- `close`、`pct_change`、`return_20d` 是行情核心字段。`PE/PB`、新闻、资金流缺失不能单独把整体质量压成 `poor`。
 
 ## 后续阶段边界
 

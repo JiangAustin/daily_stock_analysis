@@ -53,8 +53,11 @@ def main() -> int:
         for run in latest_runs:
             line = (
                 f"{run['run_date']} {run['symbol']} {run['raw_data_provider']} "
-                f"{run['research_adapter']} {run['status']}"
+                f"{run['research_adapter']} mode={run.get('run_mode') or '-'} "
+                f"status={run['status']}"
             )
+            if run.get("run_dir"):
+                line += f" run_dir={run['run_dir']}"
             quality = quality_by_run.get((run["symbol"], run["run_date"]))
             if quality:
                 line += (

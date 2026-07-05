@@ -4,6 +4,9 @@ CREATE TABLE IF NOT EXISTS research_runs (
     symbol TEXT NOT NULL,
     raw_data_provider TEXT NOT NULL,
     research_adapter TEXT NOT NULL,
+    run_mode TEXT,
+    file_run_id TEXT,
+    run_dir TEXT,
     status TEXT NOT NULL,
     started_at TEXT,
     finished_at TEXT,
@@ -141,4 +144,3 @@ CREATE TABLE IF NOT EXISTS decision_outcomes (
     evaluated_at TEXT DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(decision_id) REFERENCES research_decisions(id)
 );
-

@@ -4,6 +4,16 @@ Phase 2 只接真实 Raw Data，不接真实 LLM。
 
 默认验收仍以 mock acceptance 为准。
 
+运行产物隔离：
+
+- 每次执行 `run_stock_report.py` 都会生成独立 `file_run_id`
+- 产物默认写入 `storage/runs/{file_run_id}/...`
+- 最新指针按 run mode 隔离：
+  - `storage/latest_mock_mvp/`
+  - `storage/latest_realdata_smoke/`
+  - `storage/latest_manual/`
+- mock acceptance 与 realdata smoke 不再共用同一路径
+
 新增 `RawDataQualityReport`，用于描述：
 
 - `requested_date`：用户请求日期
@@ -25,6 +35,15 @@ Phase 2 只接真实 Raw Data，不接真实 LLM。
 - `--refresh-data` 会强制 live 拉取并覆盖缓存
 - live 失败且缓存存在时会回退缓存，并记录 `used_stale_cache_due_to_live_failure`
 - 单个 source live 失败时，会优先尝试 source-level cache，并在 provenance 中标记 `is_cached=true`
+
+K 线专项回补：
+
+- `private_ext/raw_data/akshare_kline.py` 负责 A 股 symbol 标准化、K 线 fallback、close/pct_change 提取和 `return_5d/20d/60d` 计算
+- `requested_date` 与 `actual_data_date` 不一定一致
+- 当数据源只能返回最新可用交易日时，报告和质量报告都要显示 `actual_data_date`
+- `close`、`pct_change`、`return_20d` 是行情核心字段
+- `return_20d` 优先来自 hist K 线计算；source cache 和 final raw cache 只作为回退
+- 如果 K 线窗口不足，允许保留 `return_20d=None` 并写入 `insufficient_kline_window_for_return_20d`
 
 `akshare` provider 安装方式：
 
@@ -56,6 +75,12 @@ python scripts/check_realdata_health.py --stocks 600519,000001,300750 --raw-data
 python scripts/check_realdata_health.py --stocks 600519,000001,300750 --raw-data akshare --verbose
 ```
 
+强制实时刷新：
+
+```bash
+python scripts/check_realdata_health.py --stocks 600519,000001,300750 --raw-data akshare --refresh-data --verbose
+```
+
 已知风险：
 
 - 网络不稳定
@@ -72,6 +97,7 @@ python scripts/check_realdata_health.py --stocks 600519,000001,300750 --raw-data
 - `poor` 数据不允许强 `buy`
 - `failed` 数据不应生成强决策
 - 非核心字段如新闻、公告、部分资金流缺失，不应单独把质量直接打到 `poor`
+- `PE/PB` 缺失不再直接决定整体 `poor`；只在估值维度保守处理
 
 关键字段来源说明：
 

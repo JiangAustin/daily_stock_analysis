@@ -79,6 +79,10 @@ def build_quality_report(
         for name in ["valuation_raw.pe", "valuation_raw.pb"]
     )
 
+    close_present = field_values.get("market_snapshot.close") not in (None, "", [], {})
+    pct_present = field_values.get("market_snapshot.pct_change") not in (None, "", [], {})
+    return20_present = field_values.get("kline_summary.return_20d") not in (None, "", [], {})
+
     if coverage_ratio < 0.20:
         quality_level = "failed"
         notes.append("Almost no usable raw fields were collected.")
@@ -92,6 +96,18 @@ def build_quality_report(
     if market_available_count >= 2 and quality_level in {"poor", "failed"}:
         quality_level = "degraded"
         notes.append("At least two core market fields are available, so quality is not lower than degraded.")
+
+    if close_present and return20_present and quality_level in {"poor", "failed"}:
+        quality_level = "degraded"
+        notes.append("Close and return_20d are available, so market quality stays at degraded or above.")
+
+    if close_present and not pct_present and return20_present and quality_level == "poor":
+        quality_level = "degraded"
+        notes.append("Close and return_20d are available even though pct_change is missing.")
+
+    if not close_present and return20_present and quality_level == "good":
+        quality_level = "degraded"
+        notes.append("Close is missing but return_20d is available; scoring stays enabled with degraded quality.")
 
     if valuation_available_count == 0 and market_available_count >= 2 and finance_available_count >= 1 and quality_level == "poor":
         quality_level = "degraded"

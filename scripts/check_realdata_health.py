@@ -55,6 +55,9 @@ def main() -> int:
                 "provider": quality.get("provider", args.raw_data),
                 "quality_level": str(quality.get("quality_level", "unknown")),
                 "coverage": str(quality.get("field_coverage_ratio", "")),
+                "close": _format_value((raw.market_snapshot or {}).get("close")),
+                "pct_change": _format_value((raw.market_snapshot or {}).get("pct_change")),
+                "return_20d": _format_value((raw.kline_summary or {}).get("return_20d")),
                 "can_score": str(quality.get("can_score", False)),
                 "can_make_decision": str(quality.get("can_make_decision", False)),
                 "failed_sources": ",".join(quality.get("failed_sources", [])) or "-",
@@ -85,11 +88,14 @@ def parse_args() -> argparse.Namespace:
 def _print_table(rows: list[dict[str, str]]) -> None:
     headers = [
         "symbol",
-        "provider",
         "quality_level",
         "coverage",
-        "can_score",
+        "close",
+        "pct_change",
+        "return_20d",
         "can_make_decision",
+        "provider",
+        "can_score",
         "failed_sources",
         "missing_fields",
     ]
@@ -117,6 +123,14 @@ def _print_verbose(symbol: str, quality: dict[str, object]) -> None:
             sort_keys=True,
         )
     )
+
+
+def _format_value(value: object) -> str:
+    if value in (None, "", [], {}):
+        return "-"
+    if isinstance(value, float):
+        return f"{value:.4f}"
+    return str(value)
 
 
 if __name__ == "__main__":

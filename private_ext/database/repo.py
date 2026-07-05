@@ -15,14 +15,35 @@ class ResearchRepository:
     def __init__(self, db_path: Path):
         self.db_path = db_path
 
-    def create_run(self, run_date: str, symbol: str, raw_data_provider: str, research_adapter: str) -> int:
+    def create_run(
+        self,
+        run_date: str,
+        symbol: str,
+        raw_data_provider: str,
+        research_adapter: str,
+        run_mode: str | None = None,
+        file_run_id: str | None = None,
+        run_dir: str | None = None,
+    ) -> int:
         with self._connect() as conn:
             cursor = conn.execute(
                 """
-                INSERT INTO research_runs (run_date, symbol, raw_data_provider, research_adapter, status, started_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO research_runs (
+                    run_date, symbol, raw_data_provider, research_adapter, run_mode, file_run_id, run_dir, status, started_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (run_date, symbol, raw_data_provider, research_adapter, "running", utc_now_iso()),
+                (
+                    run_date,
+                    symbol,
+                    raw_data_provider,
+                    research_adapter,
+                    run_mode,
+                    file_run_id,
+                    run_dir,
+                    "running",
+                    utc_now_iso(),
+                ),
             )
             return int(cursor.lastrowid)
 
@@ -226,7 +247,7 @@ class ResearchRepository:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 """
-                SELECT run_date, symbol, raw_data_provider, research_adapter, status, error_message
+                SELECT run_date, symbol, raw_data_provider, research_adapter, run_mode, file_run_id, run_dir, status, error_message
                 FROM research_runs
                 ORDER BY id DESC
                 LIMIT ?
