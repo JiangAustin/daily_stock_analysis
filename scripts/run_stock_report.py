@@ -36,7 +36,11 @@ def main() -> int:
     logger = setup_run_logger(settings.logs_dir, args.trade_date)
 
     try:
-        collector = create_raw_data_collector(args.raw_data)
+        collector = create_raw_data_collector(
+            args.raw_data,
+            use_cache=True,
+            refresh=args.refresh_data,
+        )
     except AkShareNotInstalledError as exc:
         raise SystemExit(str(exc)) from exc
     except (NotImplementedError, ValueError) as exc:
@@ -71,7 +75,7 @@ def main() -> int:
             research_output = research_adapter.analyze(fact_pack, scorecard)
             repo.save_research_output(run_id, research_output)
 
-            decision = decision_engine.build(scorecard, research_output)
+            decision = decision_engine.build(scorecard, research_output, fact_pack=fact_pack)
             decision = risk_gate.apply(decision, scorecard, fact_pack, current_positions=len(paper_broker.positions))
             decision_id = repo.save_research_decision(run_id, decision)
 
@@ -125,6 +129,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--raw-data", default=settings.default_raw_data)
     parser.add_argument("--research-adapter", default=settings.default_research_adapter)
     parser.add_argument("--paper-trading", choices=["on", "off"], default="on")
+    parser.add_argument("--refresh-data", action="store_true")
     return parser.parse_args()
 
 
@@ -132,6 +137,7 @@ def _ensure_dirs() -> None:
     for path in (
         settings.storage_dir,
         settings.raw_dir,
+        settings.raw_cache_dir,
         settings.fact_pack_dir,
         settings.scorecard_dir,
         settings.reports_dir,

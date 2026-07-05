@@ -32,6 +32,7 @@
 - 真实 Provider 只能替换 Raw Data 来源，不应改变下游字段语义。
 - RawStockData 的各字段允许部分为空；真实 Provider 应尽量填充，但缺失字段不得导致 collector 绕过该契约或直接让下游崩溃。
 - 真实 Provider 应把抓取失败、字段漂移和降级信息写入 `metadata`，由后续 FactPackBuilder 继续转换成 `missing_fields` / `data_quality_warnings`。
+- `metadata` 中允许包含 `quality_report`，用于描述 `requested_date`、`actual_data_date`、覆盖率、失败数据源和是否允许评分/决策。
 
 ## StockFactPack
 
@@ -63,6 +64,7 @@
 - Fact Pack 只做归一化和事实抽取，不直接给投资建议。
 - 缺失数据应进入 `missing_fields` 或 `data_quality_warnings`，不要静默吞掉。
 - FactPackBuilder 必须兼容真实数据 Provider 的部分缺失、空 dict、空 list 和 `None` 风险输入。
+- FactPackBuilder 应把 `RawDataQualityReport` 继续传递为下游可消费的质量元信息。
 
 ## StockScorecard
 
@@ -92,6 +94,7 @@
 - 同一 Fact Pack 必须生成同一 Scorecard。
 - 评分解释必须能对应到事实字段，避免黑箱分数。
 - ScoreEngine 必须能处理缺失字段；字段不足时给中性或保守分，并把保守处理写进 `score_explanations` 与 `penalty_reasons`。
+- `degraded` 数据总分上限应低于 `good`，`poor` / `failed` 数据不得产生误导性的强评分。
 
 ## InvestmentDecision
 

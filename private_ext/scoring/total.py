@@ -12,6 +12,8 @@ from private_ext.scoring.valuation import score_valuation
 
 class ScoreEngine:
     def score(self, fact_pack: StockFactPack) -> StockScorecard:
+        quality_level = str(fact_pack.metadata.get("quality_level", "good"))
+        can_score = bool(fact_pack.metadata.get("can_score", True))
         valuation_score, valuation_explain = score_valuation(fact_pack)
         growth_score, growth_explain = score_growth(fact_pack)
         profitability_score, profitability_explain = score_profitability(fact_pack)
@@ -37,6 +39,15 @@ class ScoreEngine:
                 f"missing_data_penalty:{item}" for item in fact_pack.missing_fields[:8]
             )
             total -= data_penalty
+        if not can_score:
+            penalty_reasons.append("data_quality:failed")
+            total = min(total, 40)
+        elif quality_level == "poor":
+            penalty_reasons.append("data_quality:poor")
+            total = min(total, 60)
+        elif quality_level == "degraded":
+            penalty_reasons.append("data_quality:degraded")
+            total = min(total, 75)
         total_score = round(total, 2)
         return StockScorecard(
             symbol=fact_pack.symbol,
@@ -62,6 +73,12 @@ class ScoreEngine:
                 "risk": risk_explain,
             },
             penalty_reasons=penalty_reasons,
+            metadata={
+                "quality_level": quality_level,
+                "field_coverage_ratio": fact_pack.metadata.get("field_coverage_ratio"),
+                "can_score": can_score,
+                "can_make_decision": fact_pack.metadata.get("can_make_decision", True),
+            },
         )
 
 

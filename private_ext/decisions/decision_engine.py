@@ -5,7 +5,18 @@ from private_ext.scoring.models import StockScorecard
 
 
 class DecisionEngine:
-    def build(self, scorecard: StockScorecard, research_output: ResearchOutput) -> InvestmentDecision:
+    def build(
+        self,
+        scorecard: StockScorecard,
+        research_output: ResearchOutput,
+        fact_pack=None,
+    ) -> InvestmentDecision:
+        quality_level = "good"
+        can_make_decision = True
+        if fact_pack is not None:
+            quality_level = str(fact_pack.metadata.get("quality_level", "good"))
+            can_make_decision = bool(fact_pack.metadata.get("can_make_decision", True))
+
         if scorecard.total_score >= 80:
             rating, action, confidence, target_position = "bullish", "buy", 0.78, 0.05
         elif scorecard.total_score >= 65:
@@ -14,6 +25,12 @@ class DecisionEngine:
             rating, action, confidence, target_position = "neutral", "hold", 0.55, 0.0
         else:
             rating, action, confidence, target_position = "bearish", "reduce", 0.65, 0.0
+        if quality_level == "poor" and action == "buy":
+            action, target_position = "watch", 0.0
+        if not can_make_decision and action == "buy":
+            action, target_position = "watch", 0.0
+        if quality_level == "degraded" and action == "buy":
+            confidence = max(confidence, 0.78)
         return InvestmentDecision(
             symbol=scorecard.symbol,
             trade_date=scorecard.trade_date,
@@ -54,4 +71,3 @@ def _bearish_points(scorecard: StockScorecard) -> list[str]:
     if scorecard.technical_score < 55:
         points.append("技术趋势未确认")
     return points or ["暂无显著看空项"]
-

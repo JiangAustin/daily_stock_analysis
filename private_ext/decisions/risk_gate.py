@@ -17,9 +17,23 @@ class RiskGate:
     ) -> InvestmentDecision:
         gated = decision.model_copy(deep=True)
         reasons = []
+        quality_level = str(fact_pack.metadata.get("quality_level", "good"))
+        can_make_decision = bool(fact_pack.metadata.get("can_make_decision", True))
         if gated.target_position > self.config.max_position_per_stock:
             gated.target_position = self.config.max_position_per_stock
             reasons.append("target_position_capped")
+        if not can_make_decision and gated.action in {"buy", "watch", "reduce"}:
+            gated.action = "hold" if gated.action != "buy" else "watch"
+            gated.target_position = 0
+            reasons.append("真实数据质量不足，买入信号降级为观察/持有。")
+        if quality_level == "poor" and gated.action == "buy":
+            gated.action = "watch"
+            gated.target_position = 0
+            reasons.append("真实数据质量不足，买入信号降级为观察/持有。")
+        if quality_level == "degraded" and gated.action == "buy" and gated.confidence < 0.78:
+            gated.action = "watch"
+            gated.target_position = 0
+            reasons.append("真实数据质量不足，买入信号降级为观察/持有。")
         if gated.action == "buy" and gated.confidence < 0.70:
             gated.action = "watch"
             gated.target_position = 0
@@ -47,4 +61,3 @@ class RiskGate:
         gated.risk_gate_passed = not reasons
         gated.risk_gate_reason = "passed" if not reasons else ",".join(reasons)
         return gated
-

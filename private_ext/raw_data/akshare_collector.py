@@ -12,7 +12,9 @@ except ImportError:  # pragma: no cover - exercised through runtime entrypoint
     ak = None
 
 from private_ext.raw_data.base import RawDataCollector
+from private_ext.raw_data.cache import RawDataCache
 from private_ext.raw_data.models import RawStockData
+from private_ext.raw_data.quality import build_quality_report
 
 
 class AkShareNotInstalledError(RuntimeError):
@@ -22,6 +24,13 @@ class AkShareNotInstalledError(RuntimeError):
 class AkShareRawDataCollector(RawDataCollector):
     provider = "akshare"
 
+    def __init__(self, cache_dir=None, use_cache: bool = True, refresh: bool = False):
+        from private_ext.config import settings
+
+        self.cache = RawDataCache(cache_dir or settings.raw_cache_dir)
+        self.use_cache = use_cache
+        self.refresh = refresh
+
     def collect(self, symbol: str, trade_date: str) -> RawStockData:
         if ak is None:
             raise AkShareNotInstalledError(
@@ -29,6 +38,15 @@ class AkShareRawDataCollector(RawDataCollector):
             )
 
         normalized_symbol = _normalize_symbol(symbol)
+        cached = self.cache.read(self.provider, normalized_symbol, trade_date) if self.use_cache else None
+        if self.use_cache and not self.refresh:
+            if cached is not None:
+                cached.metadata = {
+                    **(cached.metadata or {}),
+                    "loaded_from_cache": True,
+                }
+                return cached
+
         market = _infer_market(normalized_symbol)
         trade_date_compact = trade_date.replace("-", "")
         start_date = (
@@ -37,6 +55,8 @@ class AkShareRawDataCollector(RawDataCollector):
 
         warnings: list[str] = []
         payloads: dict[str, Any] = {}
+        failed_sources: list[str] = []
+        successful_sources: list[str] = []
 
         def safe_call(name: str, func: Callable[..., Any], *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
             try:
@@ -44,12 +64,15 @@ class AkShareRawDataCollector(RawDataCollector):
             except Exception as exc:
                 warnings.append(f"{name}_failed:{type(exc).__name__}")
                 payloads[name] = {"error": str(exc)}
+                failed_sources.append(name)
                 return []
 
             records = _to_records(result)
             payloads[name] = records
             if not records:
                 warnings.append(f"{name}_empty")
+            else:
+                successful_sources.append(name)
             return records
 
         info_records = safe_call("stock_individual_info_em", ak.stock_individual_info_em, symbol=normalized_symbol)
@@ -143,6 +166,7 @@ class AkShareRawDataCollector(RawDataCollector):
                 _first_present(latest_financial, ["每股经营性现金流(元)", "每股经营现金流(元)"])
             ),
         }
+        financial_raw["net_profit_growth"] = financial_raw["profit_growth"]
         financial_raw["operating_cashflow_quality"] = _classify_cashflow(financial_raw["operating_cashflow"])
 
         capital_flow_raw = {
@@ -194,15 +218,36 @@ class AkShareRawDataCollector(RawDataCollector):
             "region": _first_present(info_map, ["地域", "地区"], fallback=""),
         }
 
-        missing_fields = _missing_field_names(
-            {
-                "basic_info.name": basic_info.get("name"),
-                "market_snapshot.close": market_snapshot.get("close"),
-                "valuation_raw.pe": valuation_raw.get("pe"),
-                "financial_raw.roe": financial_raw.get("roe"),
-            }
+        actual_data_date = _first_non_empty(
+            [
+                _normalize_date(_first_present(hist_records[-1], ["日期"])) if hist_records else None,
+                northbound_raw.get("trade_date"),
+                _normalize_date(_first_present(latest_financial, ["日期"])),
+                _normalize_date(_first_present(analyst_raw[0], ["date"])) if analyst_raw else None,
+            ]
         )
-        warnings.extend(f"missing:{field}" for field in missing_fields)
+        quality_report = build_quality_report(
+            symbol=normalized_symbol,
+            requested_date=trade_date,
+            provider=self.provider,
+            actual_data_date=actual_data_date,
+            field_values={
+                "market_snapshot.close": market_snapshot.get("close"),
+                "market_snapshot.pct_change": market_snapshot.get("pct_change"),
+                "valuation_raw.pe": valuation_raw.get("pe"),
+                "valuation_raw.pb": valuation_raw.get("pb"),
+                "financial_raw.roe": financial_raw.get("roe"),
+                "financial_raw.net_profit_growth": financial_raw.get("profit_growth"),
+                "kline_summary.return_20d": kline_summary.get("pct_change_20d"),
+                "basic_info.name": basic_info.get("name"),
+                "basic_info.industry": basic_info.get("industry"),
+                "capital_flow_raw.main_net_inflow": capital_flow_raw.get("main_net_inflow"),
+            },
+            warnings=warnings,
+            failed_sources=failed_sources,
+            successful_sources=successful_sources,
+        )
+        warnings.extend(f"missing:{field}" for field in quality_report.missing_fields)
 
         if not _has_any_value(
             basic_info,
@@ -213,9 +258,11 @@ class AkShareRawDataCollector(RawDataCollector):
             news_raw,
             analyst_raw,
         ):
+            if cached is not None:
+                return _mark_cache_fallback(cached)
             raise RuntimeError(f"AkShare collector could not fetch any usable data for {normalized_symbol}")
 
-        return RawStockData(
+        raw = RawStockData(
             symbol=normalized_symbol,
             trade_date=trade_date,
             basic_info=basic_info,
@@ -234,11 +281,25 @@ class AkShareRawDataCollector(RawDataCollector):
                 "provider": self.provider,
                 "original_symbol": symbol,
                 "normalized_symbol": normalized_symbol,
+                "requested_date": trade_date,
+                "actual_data_date": actual_data_date,
                 "data_quality_warnings": sorted(set(warnings)),
-                "missing_fields": missing_fields,
+                "missing_fields": quality_report.missing_fields,
+                "quality_report": quality_report.model_dump(mode="json"),
+                "failed_sources": sorted(set(failed_sources)),
+                "successful_sources": sorted(set(successful_sources)),
                 "source_payloads": payloads,
             },
         )
+        if cached is not None and (
+            (failed_sources and quality_report.quality_level in {"poor", "failed"})
+            or (not successful_sources and quality_report.quality_level in {"poor", "failed"})
+            or not quality_report.can_make_decision
+        ):
+            return _mark_cache_fallback(cached)
+        if self.use_cache:
+            self.cache.write(self.provider, normalized_symbol, trade_date, raw)
+        return raw
 
 
 def _normalize_symbol(symbol: str) -> str:
@@ -328,6 +389,7 @@ def _build_kline_summary(records: list[dict[str, Any]]) -> tuple[dict[str, Any],
             "pct_change_5d": _window_return(closes, 5),
             "pct_change_20d": _window_return(closes, 20),
             "pct_change_60d": _window_return(closes, 60),
+            "return_20d": _window_return(closes, 20),
             "ma5": ma5,
             "ma20": ma20,
             "ma60": ma60,
@@ -421,3 +483,31 @@ def _has_any_value(*payloads: Any) -> bool:
         elif isinstance(payload, list) and payload:
             return True
     return False
+
+
+def _first_non_empty(values: list[Any]) -> Any:
+    for value in values:
+        if value not in (None, "", [], {}):
+            return value
+    return None
+
+
+def _mark_cache_fallback(cached: RawStockData) -> RawStockData:
+    cached_copy = cached.model_copy(deep=True)
+    metadata = cached_copy.metadata or {}
+    warnings = list(metadata.get("data_quality_warnings", []))
+    warnings.append("used_stale_cache_due_to_live_failure")
+    metadata["data_quality_warnings"] = sorted(set(warnings))
+    quality_report = metadata.get("quality_report")
+    if isinstance(quality_report, dict):
+        quality_warnings = list(quality_report.get("warnings", []))
+        quality_warnings.append("used_stale_cache_due_to_live_failure")
+        quality_report["warnings"] = sorted(set(quality_warnings))
+        quality_report["notes"] = [
+            *quality_report.get("notes", []),
+            "Loaded cached raw data after live collection failure.",
+        ]
+        metadata["quality_report"] = quality_report
+    metadata["loaded_from_cache"] = True
+    cached_copy.metadata = metadata
+    return cached_copy

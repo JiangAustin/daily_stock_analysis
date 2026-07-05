@@ -169,3 +169,67 @@ def test_akshare_collector_gracefully_degrades_when_partial_payloads_are_missing
     assert fact_pack.data_quality_warnings
     assert 0 <= scorecard.total_score <= 100
     assert any("missing" in reason for reason in scorecard.penalty_reasons)
+
+
+def test_akshare_collector_can_fallback_to_cache_when_live_fetch_is_too_poor(monkeypatch, tmp_path):
+    from private_ext.raw_data.akshare_collector import AkShareRawDataCollector
+    from private_ext.raw_data.cache import RawDataCache
+
+    cache = RawDataCache(tmp_path)
+    cached_raw = RawStockData(
+        symbol="600519",
+        trade_date="2026-07-03",
+        basic_info={"name": "贵州茅台", "industry": "白酒", "market": "cn"},
+        market_snapshot={"close": 1500.0, "pct_change": 1.1},
+        kline_summary={"return_20d": 4.5, "pct_change_20d": 4.5, "trend": "up", "volatility": 18.0},
+        valuation_raw={"pe": 24.0, "pb": 8.5},
+        financial_raw={"roe": 27.0, "net_profit_growth": 14.0},
+        capital_flow_raw={},
+        northbound_raw={},
+        dragon_tiger_raw={},
+        announcements_raw=[],
+        news_raw=[],
+        analyst_raw=[],
+        industry_raw={},
+        metadata={
+            "provider": "akshare",
+            "quality_report": {
+                "provider": "akshare",
+                "quality_level": "good",
+                "warnings": [],
+                "failed_sources": [],
+                "successful_sources": ["cache_seed"],
+                "field_coverage_ratio": 0.9,
+                "can_score": True,
+                "can_make_decision": True,
+                "requested_date": "2026-07-03",
+                "actual_data_date": "2026-07-03",
+                "critical_fields_present": True,
+                "missing_fields": [],
+                "notes": [],
+                "symbol": "600519",
+            },
+            "data_quality_warnings": [],
+        },
+    )
+    cache.write("akshare", "600519", "2026-07-03", cached_raw)
+
+    fake_ak = SimpleNamespace(
+        stock_individual_info_em=lambda symbol: _FakeFrame([]),
+        stock_zh_a_spot_em=lambda: _FakeFrame([]),
+        stock_zh_a_hist=lambda **kwargs: _FakeFrame([]),
+        stock_financial_analysis_indicator=lambda **kwargs: _FakeFrame([]),
+        stock_individual_fund_flow=lambda **kwargs: _FakeFrame([]),
+        stock_hsgt_individual_em=lambda symbol: _FakeFrame([]),
+        stock_lhb_stock_statistic_em=lambda symbol: _FakeFrame([]),
+        stock_news_em=lambda symbol: _FakeFrame([]),
+        stock_research_report_em=lambda symbol: _FakeFrame([]),
+    )
+    monkeypatch.setattr("private_ext.raw_data.akshare_collector.ak", fake_ak)
+
+    collector = AkShareRawDataCollector(cache_dir=tmp_path, use_cache=True, refresh=True)
+    raw = collector.collect("600519", "2026-07-03")
+
+    assert raw.market_snapshot["close"] == 1500.0
+    assert raw.metadata["loaded_from_cache"] is True
+    assert "used_stale_cache_due_to_live_failure" in raw.metadata["data_quality_warnings"]

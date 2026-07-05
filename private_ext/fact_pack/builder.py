@@ -16,6 +16,7 @@ class FactPackBuilder:
         news_raw = raw.news_raw or []
         industry_raw = raw.industry_raw or {}
         metadata = raw.metadata or {}
+        quality_report = metadata.get("quality_report", {}) if isinstance(metadata.get("quality_report", {}), dict) else {}
 
         missing = []
         missing.extend(missing_keys(basic_info, ["name", "industry"], "basic_info"))
@@ -31,6 +32,10 @@ class FactPackBuilder:
             warnings.append("news_evidence_missing")
         if len(missing) >= 3:
             warnings.append("core_fields_missing")
+        if quality_report.get("quality_level") == "poor":
+            warnings.append("数据质量较差，仅适合生成观察性报告，不适合强投资建议。")
+        if quality_report.get("quality_level") == "failed":
+            warnings.append("数据质量失败，评分和决策只能保守降级。")
 
         risk_facts = [{"risk": item, "severity": "medium"} for item in metadata.get("risk_events", []) if item]
         pe_value = valuation_raw.get("pe")
@@ -42,6 +47,7 @@ class FactPackBuilder:
         growth_facts = {
             "revenue_growth": financial_raw.get("revenue_growth"),
             "profit_growth": financial_raw.get("profit_growth"),
+            "net_profit_growth": financial_raw.get("net_profit_growth", financial_raw.get("profit_growth")),
             "industry_prosperity": industry_raw.get("prosperity"),
         }
         profitability_facts = {
@@ -86,4 +92,15 @@ class FactPackBuilder:
             risk_facts=risk_facts,
             missing_fields=list(dict.fromkeys(missing)),
             data_quality_warnings=list(dict.fromkeys(warnings)),
+            metadata={
+                "provider": metadata.get("provider"),
+                "requested_date": metadata.get("requested_date", raw.trade_date),
+                "actual_data_date": metadata.get("actual_data_date"),
+                "quality_level": quality_report.get("quality_level", "good"),
+                "field_coverage_ratio": quality_report.get("field_coverage_ratio", 1.0),
+                "can_score": quality_report.get("can_score", True),
+                "can_make_decision": quality_report.get("can_make_decision", True),
+                "failed_sources": quality_report.get("failed_sources", []),
+                "successful_sources": quality_report.get("successful_sources", []),
+            },
         )

@@ -7,6 +7,7 @@ class Settings(BaseModel):
     storage_dir: Path = Path("storage")
     db_path: Path = Path("storage/research.sqlite")
     raw_dir: Path = Path("storage/raw")
+    raw_cache_dir: Path = Path("storage/raw_cache")
     fact_pack_dir: Path = Path("storage/fact_packs")
     scorecard_dir: Path = Path("storage/scorecards")
     reports_dir: Path = Path("storage/reports")
@@ -26,4 +27,3 @@ class Settings(BaseModel):
 
 
 settings = Settings()
-
