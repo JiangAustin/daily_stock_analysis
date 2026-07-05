@@ -20,7 +20,8 @@ Raw Data
 - `scripts/run_stock_report.py`：唯一 MVP 验收入口，负责串联 Mock 原始数据、事实包、评分、决策、风控、报告、模拟交易和 SQLite 写入。
 - `private_ext/raw_data/`：原始数据采集接口与实现，当前支持 `mock`，并新增 `akshare` 作为 Phase 2 真实 A 股 Raw Data Provider。
 - `private_ext/raw_data/quality.py`：真实数据质量分级、覆盖率和可决策性判定。
-- `private_ext/raw_data/cache.py`：Provider 级 `raw_cache`，用于缓存 `akshare` 原始快照并在 live 失败时回退。
+- `private_ext/raw_data/cache.py`：Provider 级 `raw_cache` 与 source-level cache，用于缓存 `akshare` 原始快照并在 live 失败时回退。
+- `private_ext/raw_data/akshare_fallbacks.py`：关键字段 fallback 和字段来源追踪。
 - `private_ext/fact_pack/`：将 Raw Data 归一化为可评分的事实包。
 - `private_ext/scoring/`：把 Fact Pack 转为 StockScorecard。
 - `private_ext/research/`：研究适配器接口与 Mock 研究输出。当前不接真实 LLM。
@@ -32,6 +33,7 @@ Raw Data
 - `scripts/inspect_db.py`：查看 SQLite Ledger 记录数量，辅助确认多次运行不会崩溃。
 - `scripts/run_acceptance.py`：Phase 1.5 一键验收入口。
 - `scripts/check_realdata_health.py`：只检查 Raw Data 和质量报告，不进入 Decision / Paper Trading。
+- `scripts/check_realdata_health.py --verbose`：输出关键字段状态、字段来源、source cache 使用情况和 live/cache 成功失败统计。
 
 ## 验收分层
 
@@ -78,6 +80,8 @@ python scripts/run_acceptance.py --strict-env
 - 报告文件采用固定文件名，重复运行会覆盖同名 Markdown 报告，避免不可控报告堆积。
 - 当前阶段不改变 daily_stock_analysis 原 Web / Desktop 逻辑。
 - 真实数据链路需要区分 `requested_date` 与 `actual_data_date`，不能假设第三方接口一定返回请求日数据。
+- 关键字段必须记录 provenance，报告中需要明确哪些字段来自 live source、source cache 或 final raw cache。
+- 单个 source 失败不应直接拖垮整只股票；优先走 source-level cache 和字段级 fallback，再由质量报告决定是否允许决策。
 
 ## 后续阶段边界
 

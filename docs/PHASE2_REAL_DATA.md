@@ -12,13 +12,19 @@ Phase 2 只接真实 Raw Data，不接真实 LLM。
 - `field_coverage_ratio`
 - `can_score`
 - `can_make_decision`
+- `critical_field_status`
+- `field_provenance_summary`
+- `source_cache_used`
+- `live_success_count / cache_success_count / live_failure_count`
 
 新增 `raw_cache` 机制：
 
 - Provider 缓存在 `storage/raw_cache/{provider}/`
+- Source-level cache 缓存在 `storage/raw_cache/{provider}/source/{source_name}/`
 - 默认真实数据 smoke 优先使用缓存，降低 live network 抖动
 - `--refresh-data` 会强制 live 拉取并覆盖缓存
 - live 失败且缓存存在时会回退缓存，并记录 `used_stale_cache_due_to_live_failure`
+- 单个 source live 失败时，会优先尝试 source-level cache，并在 provenance 中标记 `is_cached=true`
 
 `akshare` provider 安装方式：
 
@@ -44,6 +50,12 @@ python scripts/run_stock_report.py --stocks 600519 --date 2026-07-03 --raw-data 
 python scripts/check_realdata_health.py --stocks 600519,000001,300750 --raw-data akshare
 ```
 
+详细健康检查：
+
+```bash
+python scripts/check_realdata_health.py --stocks 600519,000001,300750 --raw-data akshare --verbose
+```
+
 已知风险：
 
 - 网络不稳定
@@ -59,6 +71,12 @@ python scripts/check_realdata_health.py --stocks 600519,000001,300750 --raw-data
 - `degraded` 数据会限制 Scorecard 总分上限
 - `poor` 数据不允许强 `buy`
 - `failed` 数据不应生成强决策
+- 非核心字段如新闻、公告、部分资金流缺失，不应单独把质量直接打到 `poor`
+
+关键字段来源说明：
+
+- 报告会输出 `关键字段来源` 表，展示关键字段来自 live source、source cache 还是 final raw cache
+- 当前重点跟踪：`close`、`pct_change`、`pe`、`pb`、`roe`、`net_profit_growth`、`return_20d`
 
 为什么真实数据 smoke 不是默认 acceptance 的一部分：
 

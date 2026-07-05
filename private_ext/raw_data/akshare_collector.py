@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import math
 import re
-import statistics
+import math
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
@@ -12,9 +11,18 @@ except ImportError:  # pragma: no cover - exercised through runtime entrypoint
     ak = None
 
 from private_ext.raw_data.base import RawDataCollector
+from private_ext.raw_data.akshare_fallbacks import (
+    KEY_FIELDS,
+    fill_capital_flow,
+    fill_financial_metrics,
+    fill_kline_summary,
+    fill_market_snapshot,
+    fill_valuation,
+    summarize_field_provenance,
+)
 from private_ext.raw_data.cache import RawDataCache
 from private_ext.raw_data.models import RawStockData
-from private_ext.raw_data.quality import build_quality_report
+from private_ext.raw_data.quality import CRITICAL_FIELDS, build_quality_report
 
 
 class AkShareNotInstalledError(RuntimeError):
@@ -40,11 +48,10 @@ class AkShareRawDataCollector(RawDataCollector):
         normalized_symbol = _normalize_symbol(symbol)
         cached = self.cache.read(self.provider, normalized_symbol, trade_date) if self.use_cache else None
         if self.use_cache and not self.refresh:
-            if cached is not None:
-                cached.metadata = {
-                    **(cached.metadata or {}),
-                    "loaded_from_cache": True,
-                }
+            cached_quality = ((cached.metadata or {}).get("quality_report", {}) if cached else {}) or {}
+            if cached is not None and cached_quality.get("quality_level") in {"good", "degraded"}:
+                cached = _backfill_cached_quality_metadata(cached)
+                cached.metadata = {**(cached.metadata or {}), "loaded_from_cache": True}
                 return cached
 
         market = _infer_market(normalized_symbol)
@@ -57,22 +64,52 @@ class AkShareRawDataCollector(RawDataCollector):
         payloads: dict[str, Any] = {}
         failed_sources: list[str] = []
         successful_sources: list[str] = []
+        source_cache_used: list[str] = []
+        source_context: dict[str, dict[str, Any]] = {}
+        live_success_count = 0
+        cache_success_count = 0
+        live_failure_count = 0
 
         def safe_call(name: str, func: Callable[..., Any], *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+            nonlocal live_success_count, cache_success_count, live_failure_count
             try:
                 result = func(*args, **kwargs)
             except Exception as exc:
                 warnings.append(f"{name}_failed:{type(exc).__name__}")
                 payloads[name] = {"error": str(exc)}
                 failed_sources.append(name)
+                live_failure_count += 1
+                cached_source = self.cache.read_source(self.provider, name, normalized_symbol, trade_date) if self.use_cache else None
+                if cached_source:
+                    warnings.append(f"used_source_cache:{name}")
+                    source_cache_used.append(name)
+                    source_context[name] = {"is_cached": True, "fallback_level": 1}
+                    cache_success_count += 1
+                    payloads[name] = cached_source
+                    return cached_source
+                source_context[name] = {"is_cached": False, "fallback_level": 0}
                 return []
 
             records = _to_records(result)
-            payloads[name] = records
             if not records:
                 warnings.append(f"{name}_empty")
+                cached_source = self.cache.read_source(self.provider, name, normalized_symbol, trade_date) if self.use_cache else None
+                if cached_source:
+                    warnings.append(f"used_source_cache:{name}")
+                    source_cache_used.append(name)
+                    source_context[name] = {"is_cached": True, "fallback_level": 1}
+                    cache_success_count += 1
+                    payloads[name] = cached_source
+                    return cached_source
+                payloads[name] = records
+                source_context[name] = {"is_cached": False, "fallback_level": 0}
             else:
                 successful_sources.append(name)
+                payloads[name] = records
+                source_context[name] = {"is_cached": False, "fallback_level": 0}
+                live_success_count += 1
+                if self.use_cache:
+                    self.cache.write_source(self.provider, name, normalized_symbol, trade_date, records)
             return records
 
         info_records = safe_call("stock_individual_info_em", ak.stock_individual_info_em, symbol=normalized_symbol)
@@ -114,7 +151,13 @@ class AkShareRawDataCollector(RawDataCollector):
         latest_northbound = northbound_records[-1] if northbound_records else {}
         latest_dragon = _find_record_by_symbol(dragon_tiger_records, normalized_symbol)
 
-        kline_summary, kline_warnings = _build_kline_summary(hist_records)
+        cached_raw_dump = cached.model_dump(mode="json") if cached is not None else None
+        kline_summary, kline_provenance, kline_warnings = fill_kline_summary(
+            hist_records=hist_records,
+            source_context=source_context,
+            cached_raw=cached_raw_dump,
+            as_float=_as_float,
+        )
         warnings.extend(kline_warnings)
 
         basic_info = {
@@ -128,54 +171,40 @@ class AkShareRawDataCollector(RawDataCollector):
             "listed_date": _normalize_date(_first_present(info_map, ["上市时间", "上市日期"])),
         }
 
-        market_snapshot = {
-            "close": _as_float(_first_present(spot_row, ["最新价", "收盘"])),
-            "pct_change": _as_float(_first_present(spot_row, ["涨跌幅", "涨跌幅(%)"])),
-            "turnover_amount": _as_float(_first_present(spot_row, ["成交额"])),
-            "turnover_rate": _as_float(_first_present(spot_row, ["换手率"])),
-            "total_market_value": _as_float(
-                _first_present(spot_row, ["总市值"], fallback=_first_present(info_map, ["总市值"]))
-            ),
-            "float_market_value": _as_float(
-                _first_present(spot_row, ["流通市值"], fallback=_first_present(info_map, ["流通市值"]))
-            ),
-            "currency": "CNY",
-        }
-
-        valuation_raw = {
-            "pe": _as_float(_first_present(spot_row, ["市盈率-动态", "市盈率", "PE"])),
-            "pb": _as_float(_first_present(spot_row, ["市净率", "PB"])),
-            "ps": _as_float(_first_present(spot_row, ["市销率", "PS"])),
-            "dividend_yield": _as_float(
-                _first_present(info_map, ["股息率", "股息率TTM"], fallback=_first_present(latest_financial, ["股息率(%)"]))
-            ),
-        }
-
-        financial_raw = {
-            "revenue_growth": _as_float(
-                _first_present(latest_financial, ["主营业务收入增长率(%)", "营业收入同比增长率(%)", "营业总收入同比增长率(%)"])
-            ),
-            "profit_growth": _as_float(
-                _first_present(latest_financial, ["净利润增长率(%)", "净利润同比增长率(%)", "扣非净利润同比增长率(%)"])
-            ),
-            "roe": _as_float(_first_present(latest_financial, ["净资产收益率(%)", "净资产收益率-摊薄(%)"])),
-            "gross_margin": _as_float(_first_present(latest_financial, ["销售毛利率(%)", "毛利率(%)"])),
-            "net_margin": _as_float(_first_present(latest_financial, ["销售净利率(%)", "净利率(%)"])),
-            "debt_ratio": _as_float(_first_present(latest_financial, ["资产负债率(%)"])),
-            "operating_cashflow": _as_float(
-                _first_present(latest_financial, ["每股经营性现金流(元)", "每股经营现金流(元)"])
-            ),
-        }
-        financial_raw["net_profit_growth"] = financial_raw["profit_growth"]
-        financial_raw["operating_cashflow_quality"] = _classify_cashflow(financial_raw["operating_cashflow"])
-
-        capital_flow_raw = {
-            "main_net_inflow": _as_float(_first_present(latest_flow, ["主力净流入-净额", "主力净流入净额"])),
-            "super_large_net_inflow": _as_float(_first_present(latest_flow, ["超大单净流入-净额"])),
-            "large_net_inflow": _as_float(_first_present(latest_flow, ["大单净流入-净额"])),
-            "mid_net_inflow": _as_float(_first_present(latest_flow, ["中单净流入-净额"])),
-            "small_net_inflow": _as_float(_first_present(latest_flow, ["小单净流入-净额"])),
-        }
+        market_snapshot, market_provenance, market_warnings = fill_market_snapshot(
+            spot_row=spot_row,
+            info_map=info_map,
+            hist_summary=kline_summary,
+            source_context=source_context,
+            cached_raw=cached_raw_dump,
+            as_float=_as_float,
+        )
+        valuation_raw, valuation_provenance, valuation_warnings = fill_valuation(
+            spot_row=spot_row,
+            info_map=info_map,
+            financial_row=latest_financial,
+            source_context=source_context,
+            cached_raw=cached_raw_dump,
+            as_float=_as_float,
+        )
+        financial_raw, financial_provenance, financial_warnings = fill_financial_metrics(
+            financial_row=latest_financial,
+            info_map=info_map,
+            source_context=source_context,
+            cached_raw=cached_raw_dump,
+            as_float=_as_float,
+            classify_cashflow=_classify_cashflow,
+        )
+        capital_flow_raw, flow_warnings = fill_capital_flow(
+            flow_row=latest_flow,
+            source_context=source_context,
+            cached_raw=cached_raw_dump,
+            as_float=_as_float,
+        )
+        warnings.extend(market_warnings)
+        warnings.extend(valuation_warnings)
+        warnings.extend(financial_warnings)
+        warnings.extend(flow_warnings)
 
         northbound_raw = {
             "net_inflow": _as_float(
@@ -217,6 +246,13 @@ class AkShareRawDataCollector(RawDataCollector):
             "concepts": _split_text(_first_present(info_map, ["概念板块", "所属概念"])),
             "region": _first_present(info_map, ["地域", "地区"], fallback=""),
         }
+        field_provenance = {
+            **market_provenance,
+            **valuation_provenance,
+            **financial_provenance,
+            **kline_provenance,
+        }
+        field_provenance = summarize_field_provenance(field_provenance)
 
         actual_data_date = _first_non_empty(
             [
@@ -237,15 +273,21 @@ class AkShareRawDataCollector(RawDataCollector):
                 "valuation_raw.pe": valuation_raw.get("pe"),
                 "valuation_raw.pb": valuation_raw.get("pb"),
                 "financial_raw.roe": financial_raw.get("roe"),
-                "financial_raw.net_profit_growth": financial_raw.get("profit_growth"),
-                "kline_summary.return_20d": kline_summary.get("pct_change_20d"),
+                "financial_raw.net_profit_growth": financial_raw.get("net_profit_growth"),
+                "kline_summary.return_20d": kline_summary.get("return_20d"),
                 "basic_info.name": basic_info.get("name"),
                 "basic_info.industry": basic_info.get("industry"),
-                "capital_flow_raw.main_net_inflow": capital_flow_raw.get("main_net_inflow"),
+                "market_snapshot.turnover_rate": market_snapshot.get("turnover_rate"),
+                "market_snapshot.market_cap": market_snapshot.get("market_cap"),
             },
             warnings=warnings,
             failed_sources=failed_sources,
             successful_sources=successful_sources,
+            field_provenance=field_provenance,
+            source_cache_used=source_cache_used,
+            live_success_count=live_success_count,
+            cache_success_count=cache_success_count,
+            live_failure_count=live_failure_count,
         )
         warnings.extend(f"missing:{field}" for field in quality_report.missing_fields)
 
@@ -288,12 +330,15 @@ class AkShareRawDataCollector(RawDataCollector):
                 "quality_report": quality_report.model_dump(mode="json"),
                 "failed_sources": sorted(set(failed_sources)),
                 "successful_sources": sorted(set(successful_sources)),
+                "field_provenance": field_provenance,
+                "source_cache_used": sorted(set(source_cache_used)),
                 "source_payloads": payloads,
             },
         )
         if cached is not None and (
             (failed_sources and quality_report.quality_level in {"poor", "failed"})
             or (not successful_sources and quality_report.quality_level in {"poor", "failed"})
+            or (not successful_sources and not source_cache_used)
             or not quality_report.can_make_decision
         ):
             return _mark_cache_fallback(cached)
@@ -493,7 +538,7 @@ def _first_non_empty(values: list[Any]) -> Any:
 
 
 def _mark_cache_fallback(cached: RawStockData) -> RawStockData:
-    cached_copy = cached.model_copy(deep=True)
+    cached_copy = _backfill_cached_quality_metadata(cached.model_copy(deep=True))
     metadata = cached_copy.metadata or {}
     warnings = list(metadata.get("data_quality_warnings", []))
     warnings.append("used_stale_cache_due_to_live_failure")
@@ -511,3 +556,77 @@ def _mark_cache_fallback(cached: RawStockData) -> RawStockData:
     metadata["loaded_from_cache"] = True
     cached_copy.metadata = metadata
     return cached_copy
+
+
+def _backfill_cached_quality_metadata(raw: RawStockData) -> RawStockData:
+    metadata = raw.metadata or {}
+    quality_report = metadata.get("quality_report")
+    quality = dict(quality_report) if isinstance(quality_report, dict) else {}
+
+    field_provenance = metadata.get("field_provenance")
+    if not isinstance(field_provenance, dict) or not field_provenance:
+        field_provenance = quality.get("field_provenance_summary")
+    if not isinstance(field_provenance, dict) or not field_provenance:
+        field_provenance = _synthesize_cache_provenance(raw)
+
+    critical_field_status = quality.get("critical_field_status")
+    if not isinstance(critical_field_status, dict) or not critical_field_status:
+        field_values = _critical_field_values(raw)
+        critical_field_status = {
+            field: field_values.get(field) not in (None, "", [], {})
+            for field in CRITICAL_FIELDS
+        }
+
+    quality["field_provenance_summary"] = field_provenance
+    quality["source_cache_used"] = metadata.get("source_cache_used", quality.get("source_cache_used", []))
+    quality["live_success_count"] = metadata.get("live_success_count", quality.get("live_success_count", 0))
+    quality["cache_success_count"] = metadata.get("cache_success_count", quality.get("cache_success_count", 0))
+    quality["live_failure_count"] = metadata.get("live_failure_count", quality.get("live_failure_count", 0))
+    quality["critical_field_status"] = critical_field_status
+    metadata["field_provenance"] = field_provenance
+    metadata["source_cache_used"] = quality["source_cache_used"]
+    metadata["live_success_count"] = quality["live_success_count"]
+    metadata["cache_success_count"] = quality["cache_success_count"]
+    metadata["live_failure_count"] = quality["live_failure_count"]
+    metadata["quality_report"] = quality
+    raw.metadata = metadata
+    return raw
+
+
+def _critical_field_values(raw: RawStockData) -> dict[str, Any]:
+    return {
+        "market_snapshot.close": (raw.market_snapshot or {}).get("close"),
+        "market_snapshot.pct_change": (raw.market_snapshot or {}).get("pct_change"),
+        "valuation_raw.pe": (raw.valuation_raw or {}).get("pe"),
+        "valuation_raw.pb": (raw.valuation_raw or {}).get("pb"),
+        "financial_raw.roe": (raw.financial_raw or {}).get("roe"),
+        "financial_raw.net_profit_growth": (raw.financial_raw or {}).get("net_profit_growth"),
+        "kline_summary.return_20d": (raw.kline_summary or {}).get("return_20d"),
+    }
+
+
+def _synthesize_cache_provenance(raw: RawStockData) -> dict[str, dict[str, Any]]:
+    field_values = {
+        "market_snapshot.close": (raw.market_snapshot or {}).get("close"),
+        "market_snapshot.pct_change": (raw.market_snapshot or {}).get("pct_change"),
+        "market_snapshot.turnover_rate": (raw.market_snapshot or {}).get("turnover_rate"),
+        "market_snapshot.market_cap": (raw.market_snapshot or {}).get("market_cap")
+        or (raw.market_snapshot or {}).get("total_market_value"),
+        "valuation_raw.pe": (raw.valuation_raw or {}).get("pe"),
+        "valuation_raw.pb": (raw.valuation_raw or {}).get("pb"),
+        "financial_raw.roe": (raw.financial_raw or {}).get("roe"),
+        "financial_raw.net_profit_growth": (raw.financial_raw or {}).get("net_profit_growth"),
+        "kline_summary.return_5d": (raw.kline_summary or {}).get("return_5d"),
+        "kline_summary.return_20d": (raw.kline_summary or {}).get("return_20d"),
+        "kline_summary.return_60d": (raw.kline_summary or {}).get("return_60d"),
+    }
+    provenance: dict[str, dict[str, Any]] = {}
+    for field in KEY_FIELDS:
+        value = field_values.get(field)
+        provenance[field] = {
+            "source": "raw_cache" if value not in (None, "", [], {}) else None,
+            "fallback_level": 2 if value not in (None, "", [], {}) else 0,
+            "is_cached": value not in (None, "", [], {}),
+            "confidence": "low" if value not in (None, "", [], {}) else "missing",
+        }
+    return provenance

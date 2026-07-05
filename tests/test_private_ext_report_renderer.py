@@ -82,5 +82,6 @@ def test_private_ext_report_renderer_writes_required_markdown_sections(tmp_path:
     assert path.name == "stock_report_600519_2026-07-03.md"
     assert "# A股AI投研报告" in report
     assert "## 1. 结论摘要" in report
+    assert "## 数据质量与可用性" in report
     assert "## 9. 风险提示" in report
     assert "不构成投资建议" in report

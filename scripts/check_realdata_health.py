@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -60,6 +61,8 @@ def main() -> int:
                 "missing_fields": ",".join(quality.get("missing_fields", [])) or "-",
             }
         )
+        if args.verbose:
+            _print_verbose(raw.symbol, quality)
 
     _print_table(reports)
     if reports and all(item["quality_level"] == "failed" for item in reports):
@@ -75,6 +78,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--date", default="2026-07-03")
     parser.add_argument("--raw-data", default="akshare")
     parser.add_argument("--refresh-data", action="store_true")
+    parser.add_argument("--verbose", action="store_true")
     return parser.parse_args()
 
 
@@ -93,6 +97,26 @@ def _print_table(rows: list[dict[str, str]]) -> None:
     print("|" + "|".join(["---"] * len(headers)) + "|")
     for row in rows:
         print("| " + " | ".join(row.get(header, "") for header in headers) + " |")
+
+
+def _print_verbose(symbol: str, quality: dict[str, object]) -> None:
+    print(f"\n[{symbol}] verbose quality detail")
+    print("critical_field_status:")
+    print(json.dumps(quality.get("critical_field_status", {}), ensure_ascii=False, indent=2, sort_keys=True))
+    print("source_cache_used:", ",".join(quality.get("source_cache_used", [])) or "-")
+    print("live_success_count:", quality.get("live_success_count", 0))
+    print("cache_success_count:", quality.get("cache_success_count", 0))
+    print("live_failure_count:", quality.get("live_failure_count", 0))
+    print("failed_sources:", ",".join(quality.get("failed_sources", [])) or "-")
+    print("field_provenance_summary:")
+    print(
+        json.dumps(
+            quality.get("field_provenance_summary", {}),
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        )
+    )
 
 
 if __name__ == "__main__":

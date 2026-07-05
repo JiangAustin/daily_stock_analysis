@@ -33,10 +33,16 @@ class ScoreEngine:
             + sentiment_score * 0.10
             + risk_score * 0.10
         )
-        data_penalty = min(12, len(fact_pack.missing_fields) * 1.5 + len(fact_pack.data_quality_warnings) * 0.5)
+        material_missing_fields = [
+            item for item in fact_pack.missing_fields if not _is_non_core_data_gap(item)
+        ]
+        material_warnings = [
+            item for item in fact_pack.data_quality_warnings if not _is_non_core_data_gap(item)
+        ]
+        data_penalty = min(12, len(material_missing_fields) * 1.5 + len(material_warnings) * 0.5)
         if data_penalty:
             penalty_reasons.extend(
-                f"missing_data_penalty:{item}" for item in fact_pack.missing_fields[:8]
+                f"missing_data_penalty:{item}" for item in material_missing_fields[:8]
             )
             total -= data_penalty
         if not can_score:
@@ -90,3 +96,16 @@ def _rating_band(total_score: float) -> str:
     if total_score >= 50:
         return "neutral"
     return "weak"
+
+
+def _is_non_core_data_gap(item: str) -> bool:
+    text = str(item or "")
+    return any(
+        marker in text
+        for marker in (
+            "announcement_",
+            "news_",
+            "analyst_",
+            "capital_flow_missing_after_fallback",
+        )
+    )

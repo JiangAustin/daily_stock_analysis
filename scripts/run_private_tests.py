@@ -17,8 +17,11 @@ PRIVATE_TEST_FILES = [
     "tests/test_paper_broker.py",
     "tests/test_phase15_stability.py",
     "tests/test_akshare_collector_mapping.py",
+    "tests/test_akshare_fallbacks.py",
     "tests/test_raw_data_quality.py",
     "tests/test_raw_data_cache.py",
+    "tests/test_source_level_cache.py",
+    "tests/test_quality_field_provenance.py",
     "tests/test_realdata_quality_integration.py",
 ]
 

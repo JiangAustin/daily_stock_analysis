@@ -27,6 +27,12 @@ class RawDataQualityReport(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     failed_sources: list[str] = Field(default_factory=list)
     successful_sources: list[str] = Field(default_factory=list)
+    critical_field_status: dict[str, bool] = Field(default_factory=dict)
+    field_provenance_summary: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    source_cache_used: list[str] = Field(default_factory=list)
+    live_success_count: int = 0
+    cache_success_count: int = 0
+    live_failure_count: int = 0
     quality_level: str
     can_score: bool
     can_make_decision: bool
@@ -43,15 +49,36 @@ def build_quality_report(
     warnings: list[str],
     failed_sources: list[str],
     successful_sources: list[str],
+    field_provenance: dict[str, dict[str, Any]] | None = None,
+    source_cache_used: list[str] | None = None,
+    live_success_count: int = 0,
+    cache_success_count: int = 0,
+    live_failure_count: int = 0,
 ) -> RawDataQualityReport:
     missing_fields = [name for name, value in field_values.items() if value in (None, "", [], {})]
     present_count = len(field_values) - len(missing_fields)
     coverage_ratio = round(present_count / len(field_values), 2) if field_values else 0.0
     missing_critical = [field for field in CRITICAL_FIELDS if field in missing_fields]
+    critical_field_status = {field: field not in missing_fields for field in CRITICAL_FIELDS}
     critical_fields_present = not missing_critical
 
     quality_level = "good"
     notes: list[str] = []
+    market_fields = [
+        field_values.get("market_snapshot.close"),
+        field_values.get("market_snapshot.pct_change"),
+        field_values.get("kline_summary.return_20d"),
+    ]
+    market_available_count = sum(value not in (None, "", [], {}) for value in market_fields)
+    finance_available_count = sum(
+        field_values.get(name) not in (None, "", [], {})
+        for name in ["financial_raw.roe", "financial_raw.net_profit_growth"]
+    )
+    valuation_available_count = sum(
+        field_values.get(name) not in (None, "", [], {})
+        for name in ["valuation_raw.pe", "valuation_raw.pb"]
+    )
+
     if coverage_ratio < 0.20:
         quality_level = "failed"
         notes.append("Almost no usable raw fields were collected.")
@@ -61,6 +88,18 @@ def build_quality_report(
     elif coverage_ratio < 0.80:
         quality_level = "degraded"
         notes.append("Partial data is available; downstream scoring must stay conservative.")
+
+    if market_available_count >= 2 and quality_level in {"poor", "failed"}:
+        quality_level = "degraded"
+        notes.append("At least two core market fields are available, so quality is not lower than degraded.")
+
+    if valuation_available_count == 0 and market_available_count >= 2 and finance_available_count >= 1 and quality_level == "poor":
+        quality_level = "degraded"
+        notes.append("Valuation fields are missing, but market and finance data keep quality at degraded.")
+
+    if finance_available_count == 0 and market_available_count >= 2 and valuation_available_count >= 1 and quality_level == "poor":
+        quality_level = "degraded"
+        notes.append("Financial fields are missing, but market and valuation data keep quality at degraded.")
 
     if missing_critical and quality_level == "good":
         quality_level = "degraded"
@@ -88,6 +127,12 @@ def build_quality_report(
         warnings=sorted(set(warnings)),
         failed_sources=sorted(set(failed_sources)),
         successful_sources=sorted(set(successful_sources)),
+        critical_field_status=critical_field_status,
+        field_provenance_summary=field_provenance or {},
+        source_cache_used=sorted(set(source_cache_used or [])),
+        live_success_count=live_success_count,
+        cache_success_count=cache_success_count,
+        live_failure_count=live_failure_count,
         quality_level=quality_level,
         can_score=can_score,
         can_make_decision=can_make_decision,
