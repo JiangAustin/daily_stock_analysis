@@ -47,6 +47,8 @@ def main() -> int:
             args.raw_data,
             use_cache=True,
             refresh=args.refresh_data,
+            manual_data_dir=args.manual_data_dir,
+            manual_file_format=args.manual_file_format,
         )
     except AkShareNotInstalledError as exc:
         raise SystemExit(str(exc)) from exc
@@ -194,7 +196,7 @@ def main() -> int:
     return 0
 
 
-def _parse_args() -> argparse.Namespace:
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run A-share research report pipeline.")
     parser.add_argument("--stocks", required=True)
     parser.add_argument("--date", dest="trade_date", required=True)
@@ -206,9 +208,11 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Force live fetch for this run and disable cache fallback.",
     )
+    parser.add_argument("--manual-data-dir", default=str(settings.storage_dir / "manual_data"))
+    parser.add_argument("--manual-file-format", choices=["auto", "csv", "json"], default="auto")
     parser.add_argument("--run-mode", choices=["mock_mvp", "realdata_smoke", "manual"])
     parser.add_argument("--print-json-summary", action="store_true")
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def _ensure_dirs() -> None:

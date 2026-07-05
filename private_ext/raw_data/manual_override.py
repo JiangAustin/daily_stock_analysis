@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import csv
 import json
+import math
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
-from private_ext.raw_data.akshare_fallbacks import build_field_provenance, summarize_field_provenance
 from private_ext.raw_data.models import RawStockData
 
 
@@ -22,17 +22,14 @@ SUPPORTED_FIELDS = {
     "financial_raw.net_profit_growth",
 }
 
-NUMERIC_FIELDS = SUPPORTED_FIELDS
-ALLOWED_CONFIDENCE = {"low", "medium", "high"}
 
-
-@dataclass(frozen=True)
+@dataclass(slots=True)
 class ManualOverrideRecord:
     field: str
     value: Any
-    source_note: str
+    source_note: str | None
     source_url: str | None
-    updated_at: str
+    updated_at: str | None
     confidence: str
     allow_override: bool
 
@@ -48,226 +45,206 @@ class ManualOverrideRecord:
         }
 
 
-def manual_override_path(manual_data_dir: Path, symbol: str, trade_date: str, file_format: str) -> Path:
-    suffix = file_format.lower().strip()
-    if suffix not in {"csv", "json"}:
-        raise ValueError(f"Unsupported manual override format: {file_format}")
-    return manual_data_dir / f"{symbol}_{trade_date}.{suffix}"
+def first_non_missing(*values: Any) -> Any:
+    for value in values:
+        if not _is_missing(value):
+            return value
+    return None
+
+
+def manual_override_path(manual_data_dir: str | Path, symbol: str, trade_date: str, file_format: str) -> Path:
+    ext = {"csv": "csv", "json": "json"}.get(file_format, file_format)
+    return Path(manual_data_dir) / f"{symbol}_{trade_date}.{ext}"
 
 
 def load_manual_override_records(
     *,
-    manual_data_dir: Path,
+    manual_data_dir: str | Path,
     symbol: str,
     trade_date: str,
     file_format: str = "auto",
-) -> tuple[list[ManualOverrideRecord], Path | None, str]:
-    manual_data_dir = Path(manual_data_dir)
-    candidates = _candidate_paths(manual_data_dir, symbol, trade_date, file_format)
-    for path, candidate_name in candidates:
-        if not path.exists():
-            continue
-        if path.suffix.lower() == ".csv":
-            return _parse_manual_csv(path), path, candidate_name
-        if path.suffix.lower() == ".json":
-            return _parse_manual_json(path), path, candidate_name
-        raise ValueError(f"Unsupported manual override file suffix: {path.suffix}")
-    return [], None, _candidate_name_for_format(file_format)
+) -> tuple[list[ManualOverrideRecord], str, Path]:
+    if file_format not in {"auto", "csv", "json"}:
+        raise ValueError("manual_file_format must be auto, csv, or json")
 
-
-def apply_manual_override(
-    base_raw: RawStockData,
-    records: Iterable[ManualOverrideRecord],
-    *,
-    candidate: str,
-    source_path: str | None,
-    required: bool = True,
-) -> RawStockData:
-    payload = base_raw.model_dump(mode="json")
-    metadata = dict(payload.get("metadata") or {})
-    warnings = list(dict.fromkeys(str(item) for item in metadata.get("data_quality_warnings", []) if item))
-    manual_records = [record.as_dict() for record in records]
-    applied_records: list[dict[str, Any]] = []
-    skipped_records: list[dict[str, Any]] = []
-    field_provenance = dict(metadata.get("field_provenance") or {})
-
-    for record in records:
-        if record.field not in SUPPORTED_FIELDS:
-            warnings.append(f"manual_override_unknown_field:{record.field}")
-            skipped_records.append({**record.as_dict(), "applied": False, "reason": "unknown_field"})
-            continue
-        if _is_missing(record.value):
-            warnings.append(f"manual_override_missing_value:{record.field}")
-            skipped_records.append({**record.as_dict(), "applied": False, "reason": "missing_value"})
-            continue
-
-        current_value = _get_nested(payload, record.field)
-        if _is_missing(current_value):
-            _set_nested(payload, record.field, record.value)
-            warnings.append(f"manual_override_filled_missing_field:{record.field}")
-            applied_records.append({**record.as_dict(), "applied": True, "action": "filled_missing"})
-            field_provenance[record.field] = build_field_provenance(
-                source="manual_override",
-                candidate=candidate,
-                fallback_level=0,
-                is_cached=False,
-                confidence=record.confidence,
-                source_note=record.source_note,
-                source_url=record.source_url,
-                updated_at=record.updated_at,
-                allow_override=record.allow_override,
-            )
-            continue
-
-        if record.allow_override:
-            _set_nested(payload, record.field, record.value)
-            warnings.append(f"manual_override_replaced_live_value:{record.field}")
-            applied_records.append({**record.as_dict(), "applied": True, "action": "replaced_live"})
-            field_provenance[record.field] = build_field_provenance(
-                source="manual_override",
-                candidate=candidate,
-                fallback_level=0,
-                is_cached=False,
-                confidence=record.confidence,
-                source_note=record.source_note,
-                source_url=record.source_url,
-                updated_at=record.updated_at,
-                allow_override=record.allow_override,
-            )
-            continue
-
-        skipped_records.append({**record.as_dict(), "applied": False, "reason": "live_value_present"})
-
-    metadata["field_provenance"] = summarize_field_provenance(field_provenance)
-    manual_override = {
-        "provider": candidate,
-        "source_path": source_path,
-        "records": manual_records,
-        "applied_records": applied_records,
-        "skipped_records": skipped_records,
-        "applied_fields": [item["field"] for item in applied_records],
-        "filled_missing_fields": [item["field"] for item in applied_records if item.get("action") == "filled_missing"],
-        "replaced_live_fields": [item["field"] for item in applied_records if item.get("action") == "replaced_live"],
-        "warnings": warnings,
-    }
-    metadata["manual_override"] = manual_override
-    metadata["data_quality_warnings"] = sorted(set(warnings))
-    if required and source_path is None:
-        raise FileNotFoundError(f"Manual override file not found for {base_raw.symbol} on {base_raw.trade_date}")
-    payload["metadata"] = metadata
-    return RawStockData.model_validate(payload)
+    csv_path = manual_override_path(manual_data_dir, symbol, trade_date, "csv")
+    json_path = manual_override_path(manual_data_dir, symbol, trade_date, "json")
+    if file_format == "auto":
+        if csv_path.exists():
+            return _load_manual_override_csv(csv_path), "manual_csv", csv_path
+        if json_path.exists():
+            return _load_manual_override_json(json_path), "manual_json", json_path
+        raise FileNotFoundError(
+            f"No manual override file found for {symbol} {trade_date} under {manual_data_dir}"
+        )
+    if file_format == "csv":
+        if not csv_path.exists():
+            raise FileNotFoundError(f"Manual CSV file not found: {csv_path}")
+        return _load_manual_override_csv(csv_path), "manual_csv", csv_path
+    if not json_path.exists():
+        raise FileNotFoundError(f"Manual JSON file not found: {json_path}")
+    return _load_manual_override_json(json_path), "manual_json", json_path
 
 
 def build_manual_raw_stock_data(
     *,
     symbol: str,
     trade_date: str,
-    records: Iterable[ManualOverrideRecord],
+    records: list[ManualOverrideRecord],
+    provider: str,
     candidate: str,
-    source_path: str | None,
+    source_path: str | Path,
 ) -> RawStockData:
-    payload = {
-        "symbol": symbol,
-        "trade_date": trade_date,
-        "basic_info": {},
-        "market_snapshot": {"currency": "CNY"},
-        "kline_summary": {},
-        "valuation_raw": {},
-        "financial_raw": {},
-        "capital_flow_raw": {},
-        "northbound_raw": {},
-        "dragon_tiger_raw": {},
-        "announcements_raw": [],
-        "news_raw": [],
-        "analyst_raw": [],
-        "industry_raw": {},
-        "metadata": {},
-    }
-    manual_raw = RawStockData.model_validate(payload)
-    manual_override = apply_manual_override(
-        manual_raw,
-        records,
-        candidate=candidate,
-        source_path=source_path,
-        required=False,
+    base = RawStockData(
+        symbol=symbol,
+        trade_date=trade_date,
+        basic_info={},
+        market_snapshot={},
+        kline_summary={},
+        valuation_raw={},
+        financial_raw={},
+        capital_flow_raw={},
+        northbound_raw={},
+        dragon_tiger_raw={},
+        announcements_raw=[],
+        news_raw=[],
+        analyst_raw=[],
+        industry_raw={},
+        metadata={
+            "provider": provider,
+            "providers_used": [provider],
+            "manual_override": {
+                "provider": provider,
+                "candidate": candidate,
+                "source_path": str(source_path),
+                "records": [record.as_dict() for record in records],
+                "applied_records": [],
+                "skipped_records": [],
+                "applied_fields": [],
+                "filled_missing_fields": [],
+                "replaced_live_fields": [],
+            },
+            "data_quality_warnings": [],
+            "field_provenance": {},
+        },
     )
-    manual_override.metadata["manual_override"]["records"] = [record.as_dict() for record in records]
-    return manual_override
+    return apply_manual_override_to_raw(base, manual_raw=base)
 
 
-def _parse_manual_csv(path: Path) -> list[ManualOverrideRecord]:
+def apply_manual_override_to_raw(base_raw: RawStockData, *, manual_raw: RawStockData) -> RawStockData:
+    merged = base_raw.model_dump(mode="json")
+    manual_meta = dict((manual_raw.metadata or {}).get("manual_override") or {})
+    provider = first_non_missing(manual_meta.get("provider"), manual_raw.metadata.get("provider"), "manual_override")
+    candidate = first_non_missing(
+        manual_meta.get("candidate"),
+        manual_meta.get("provider"),
+        manual_raw.metadata.get("provider"),
+        "manual_override",
+    )
+    records = _normalize_records(manual_meta.get("records", []))
+
+    provenance = dict((merged.get("metadata") or {}).get("field_provenance") or {})
+    warnings = list((merged.get("metadata") or {}).get("data_quality_warnings") or [])
+    applied_records: list[dict[str, Any]] = []
+    skipped_records: list[dict[str, Any]] = []
+    applied_fields: list[str] = []
+    filled_missing_fields: list[str] = []
+    replaced_live_fields: list[str] = []
+
+    for record in records:
+        current_value = _get_nested(merged, record.field)
+        if _is_missing(current_value) or record.allow_override:
+            if _is_missing(current_value):
+                filled_missing_fields.append(record.field)
+                warnings.append(f"manual_override_filled_missing_field:{record.field}")
+            else:
+                replaced_live_fields.append(record.field)
+                warnings.append(f"manual_override_replaced_live_value:{record.field}")
+            _set_nested(merged, record.field, record.value)
+            provenance[record.field] = {
+                "source": provider,
+                "candidate": candidate,
+                "is_cached": False,
+                "confidence": record.confidence,
+                "source_note": record.source_note,
+                "source_url": record.source_url,
+                "updated_at": record.updated_at,
+                "allow_override": record.allow_override,
+            }
+            applied_records.append(record.as_dict())
+            applied_fields.append(record.field)
+        else:
+            skipped_records.append(record.as_dict())
+
+    merged_metadata = dict(merged.get("metadata") or {})
+    merged_metadata["provider"] = merged_metadata.get("provider", provider)
+    merged_metadata["providers_used"] = _unique_list([*(merged_metadata.get("providers_used") or []), provider])
+    merged_metadata["manual_override"] = {
+        **manual_meta,
+        "provider": provider,
+        "candidate": candidate,
+        "records": [record.as_dict() for record in records],
+        "applied_records": applied_records,
+        "skipped_records": skipped_records,
+        "applied_fields": applied_fields,
+        "filled_missing_fields": filled_missing_fields,
+        "replaced_live_fields": replaced_live_fields,
+    }
+    merged_metadata["data_quality_warnings"] = _unique_list([*warnings])
+    merged_metadata["field_provenance"] = provenance
+    merged["metadata"] = merged_metadata
+    return RawStockData.model_validate(merged)
+
+
+def _load_manual_override_csv(path: Path) -> list[ManualOverrideRecord]:
+    rows: list[ManualOverrideRecord] = []
     with path.open("r", encoding="utf-8", newline="") as handle:
-        rows = list(csv.DictReader(handle))
-    return [_row_to_record(row) for row in rows]
+        reader = csv.DictReader(handle)
+        for row in reader:
+            rows.append(_record_from_dict(row))
+    return rows
 
 
-def _parse_manual_json(path: Path) -> list[ManualOverrideRecord]:
-    data = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(data, list):
-        raise ValueError(f"Manual override JSON must contain an array: {path}")
-    return [_row_to_record(row) for row in data if isinstance(row, dict)]
+def _load_manual_override_json(path: Path) -> list[ManualOverrideRecord]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, list):
+        raise ValueError(f"Manual JSON file must contain a list of records: {path}")
+    return [_record_from_dict(item) for item in payload]
 
 
-def _row_to_record(row: dict[str, Any]) -> ManualOverrideRecord:
-    field = str(row.get("field", "")).strip()
+def _record_from_dict(data: dict[str, Any]) -> ManualOverrideRecord:
+    field = str(data.get("field", "")).strip()
     if not field:
         raise ValueError("Manual override record is missing field")
-    value = _coerce_value(field, row.get("value"))
-    source_note = str(row.get("source_note", "")).strip()
-    source_url = _string_or_none(row.get("source_url"))
-    updated_at = str(row.get("updated_at", "")).strip()
-    confidence = str(row.get("confidence", "medium")).strip().lower() or "medium"
-    if confidence not in ALLOWED_CONFIDENCE:
+    if field not in SUPPORTED_FIELDS:
+        raise ValueError(f"Unsupported manual override field: {field}")
+    confidence = str(data.get("confidence") or "medium").strip().lower()
+    if confidence not in {"low", "medium", "high"}:
         confidence = "medium"
-    allow_override = _coerce_bool(row.get("allow_override", False))
+    allow_override = str(data.get("allow_override", "")).strip().lower() in {"1", "true", "yes", "on"}
     return ManualOverrideRecord(
         field=field,
-        value=value,
-        source_note=source_note,
-        source_url=source_url,
-        updated_at=updated_at,
+        value=_parse_value(data.get("value")),
+        source_note=_string_or_none(data.get("source_note")),
+        source_url=_string_or_none(data.get("source_url")),
+        updated_at=_string_or_none(data.get("updated_at")),
         confidence=confidence,
         allow_override=allow_override,
     )
 
 
-def _coerce_value(field: str, value: Any) -> Any:
-    if field in NUMERIC_FIELDS:
-        if _is_missing(value):
-            return None
-        if isinstance(value, (int, float)):
-            return float(value)
-        text = str(value).strip()
-        if not text:
-            return None
-        try:
-            return float(text)
-        except ValueError:
-            return value
-    return value
-
-
-def _candidate_paths(manual_data_dir: Path, symbol: str, trade_date: str, file_format: str) -> list[tuple[Path, str]]:
-    if file_format == "auto":
-        return [
-            (manual_override_path(manual_data_dir, symbol, trade_date, "csv"), "manual_csv"),
-            (manual_override_path(manual_data_dir, symbol, trade_date, "json"), "manual_json"),
-        ]
-    candidate = f"manual_{file_format.lower().strip()}"
-    return [(manual_override_path(manual_data_dir, symbol, trade_date, file_format), candidate)]
-
-
-def _candidate_name_for_format(file_format: str) -> str:
-    if file_format == "auto":
-        return "manual_override"
-    return f"manual_{file_format.lower().strip()}"
-
-
-def _coerce_bool(value: Any) -> bool:
-    if isinstance(value, bool):
+def _parse_value(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, (int, float, bool)):
         return value
-    text = str(value).strip().lower()
-    return text in {"1", "true", "yes", "y", "on"}
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return json.loads(text)
+    except Exception:
+        return text
 
 
 def _string_or_none(value: Any) -> str | None:
@@ -275,6 +252,16 @@ def _string_or_none(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _normalize_records(records: list[dict[str, Any]] | list[ManualOverrideRecord]) -> list[ManualOverrideRecord]:
+    normalized: list[ManualOverrideRecord] = []
+    for record in records:
+        if isinstance(record, ManualOverrideRecord):
+            normalized.append(record)
+        else:
+            normalized.append(_record_from_dict(record))
+    return normalized
 
 
 def _get_nested(payload: dict[str, Any], path: str) -> Any:
@@ -287,18 +274,22 @@ def _get_nested(payload: dict[str, Any], path: str) -> Any:
 
 
 def _set_nested(payload: dict[str, Any], path: str, value: Any) -> None:
-    parts = path.split(".")
     current = payload
+    parts = path.split(".")
     for part in parts[:-1]:
         current = current.setdefault(part, {})
     current[parts[-1]] = value
 
 
 def _is_missing(value: Any) -> bool:
-    if value is None:
+    if value in (None, "", "-", "--", "N/A", "n/a", [], {}):
         return True
-    if isinstance(value, float):
-        return value != value
-    if isinstance(value, str):
-        return value.strip() in {"", "-", "N/A", "n/a", "--"}
-    return value in ([], {})
+    return isinstance(value, float) and math.isnan(value)
+
+
+def _unique_list(values: list[Any]) -> list[Any]:
+    seen: list[Any] = []
+    for value in values:
+        if value not in seen:
+            seen.append(value)
+    return seen

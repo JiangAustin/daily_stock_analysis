@@ -4,10 +4,7 @@ from private_ext.raw_data.akshare_collector import AkShareRawDataCollector
 from private_ext.raw_data.base import RawDataCollector
 from private_ext.raw_data.eastmoney_diagnostics import EastMoneyDiagnosticsReport
 from private_ext.raw_data.eastmoney_collector import EastMoneyRawDataCollector
-from private_ext.raw_data.manual_override_collector import (
-    ManualOverrideRawDataCollector,
-    apply_manual_override_to_raw,
-)
+from private_ext.raw_data.manual_override import apply_manual_override_to_raw
 from private_ext.raw_data.merge import merge_raw_stock_data
 from private_ext.raw_data.quality import build_quality_report
 
@@ -19,7 +16,7 @@ class CompositeRawDataCollector(RawDataCollector):
         self,
         primary: RawDataCollector | None = None,
         secondary: RawDataCollector | None = None,
-        manual_override: ManualOverrideRawDataCollector | None = None,
+        manual_override: RawDataCollector | None = None,
         **kwargs,
     ):
         self.primary = primary or AkShareRawDataCollector(**kwargs)
@@ -30,42 +27,41 @@ class CompositeRawDataCollector(RawDataCollector):
         primary_raw = self.primary.collect(symbol, trade_date)
         secondary_raw = self.secondary.collect(symbol, trade_date)
         merged = merge_raw_stock_data(primary_raw, secondary_raw)
-        provider_reports = {
+        manual_raw = self.manual_override.collect(symbol, trade_date) if self.manual_override else None
+        if manual_raw is not None:
+            merged = apply_manual_override_to_raw(merged, manual_raw=manual_raw)
+        merged.metadata["provider"] = self.provider
+        merged.metadata["providers_used"] = ["akshare", "eastmoney"]
+        eastmoney_diagnostics = secondary_raw.metadata.get("eastmoney_diagnostics") or EastMoneyDiagnosticsReport(
+            symbol=secondary_raw.symbol,
+            requested_date=trade_date,
+            endpoint_results=[],
+            successful_endpoints=[],
+            failed_endpoints=[],
+            fields_filled_by_endpoint={},
+            unresolved_fields=[],
+            remote_errors=[],
+            cache_used=[],
+            notes=[],
+        ).model_dump(mode="json")
+        merged.metadata["provider_reports"] = {
             "akshare": primary_raw.metadata.get("quality_report", {}),
             "eastmoney": {
                 **(secondary_raw.metadata.get("quality_report", {}) or {}),
-                "diagnostics": secondary_raw.metadata.get("eastmoney_diagnostics")
-                or EastMoneyDiagnosticsReport(
-                    symbol=secondary_raw.symbol,
-                    requested_date=trade_date,
-                    endpoint_results=[],
-                    successful_endpoints=[],
-                    failed_endpoints=[],
-                    fields_filled_by_endpoint={},
-                    unresolved_fields=[],
-                    remote_errors=[],
-                    cache_used=[],
-                    notes=[],
-                ).model_dump(mode="json"),
+                "diagnostics": eastmoney_diagnostics,
             },
         }
-        if self.manual_override is not None:
-            manual_raw = self.manual_override.collect(symbol, trade_date)
-            merged = apply_manual_override_to_raw(merged, manual_raw=manual_raw)
-            provider_reports["manual_override"] = manual_raw.metadata.get("quality_report", {})
-            merged.metadata.setdefault("manual_override", {})
-            merged.metadata["manual_override"]["source_path"] = manual_raw.metadata.get("manual_override", {}).get("source_path")
-            merged.metadata["manual_override"]["records"] = manual_raw.metadata.get("manual_override", {}).get("records", [])
-            merged.metadata["manual_override"]["candidate"] = manual_raw.metadata.get("manual_override", {}).get(
-                "provider",
-                self.manual_override.provider,
-            )
-        merged.metadata["provider"] = self.provider
-        providers_used = ["akshare", "eastmoney"]
-        if self.manual_override is not None:
-            providers_used.append(self.manual_override.provider)
-        merged.metadata["providers_used"] = providers_used
-        merged.metadata["provider_reports"] = provider_reports
+        if manual_raw is not None:
+            manual_override_meta = dict(manual_raw.metadata.get("manual_override", {}) or {})
+            merged.metadata["manual_override"] = manual_override_meta
+            merged.metadata["providers_used"] = [*merged.metadata["providers_used"], manual_override_meta.get("provider", "manual_override")]
+            merged.metadata["provider_reports"]["manual_override"] = {
+                **(manual_raw.metadata.get("quality_report", {}) or {}),
+                "provider": manual_override_meta.get("provider"),
+                "candidate": manual_override_meta.get("candidate"),
+                "source_path": manual_override_meta.get("source_path"),
+                "manual_override": manual_override_meta,
+            }
         quality_report = build_quality_report(
             symbol=merged.symbol,
             requested_date=trade_date,
@@ -97,24 +93,27 @@ class CompositeRawDataCollector(RawDataCollector):
             source_cache_used=[
                 *(primary_raw.metadata.get("source_cache_used") or []),
                 *(secondary_raw.metadata.get("source_cache_used") or []),
+                *((manual_raw.metadata.get("source_cache_used") or []) if manual_raw else []),
             ],
             live_success_count=(
                 (primary_raw.metadata.get("quality_report") or {}).get("live_success_count", 0)
                 + (secondary_raw.metadata.get("quality_report") or {}).get("live_success_count", 0)
+                + ((manual_raw.metadata.get("quality_report") or {}).get("live_success_count", 0) if manual_raw else 0)
             ),
             cache_success_count=(
                 (primary_raw.metadata.get("quality_report") or {}).get("cache_success_count", 0)
                 + (secondary_raw.metadata.get("quality_report") or {}).get("cache_success_count", 0)
+                + ((manual_raw.metadata.get("quality_report") or {}).get("cache_success_count", 0) if manual_raw else 0)
             ),
             live_failure_count=(
                 (primary_raw.metadata.get("quality_report") or {}).get("live_failure_count", 0)
                 + (secondary_raw.metadata.get("quality_report") or {}).get("live_failure_count", 0)
+                + ((manual_raw.metadata.get("quality_report") or {}).get("live_failure_count", 0) if manual_raw else 0)
             ),
         )
         merged.metadata["quality_report"] = quality_report.model_dump(mode="json")
         merged.metadata["quality_report"]["providers_used"] = merged.metadata["providers_used"]
         merged.metadata["quality_report"]["provider_reports"] = merged.metadata["provider_reports"]
         merged.metadata["quality_report"]["merge_warnings"] = merged.metadata.get("merge_warnings", [])
-        merged.metadata["quality_report"]["manual_override"] = merged.metadata.get("manual_override", {})
         merged.metadata["missing_fields"] = quality_report.missing_fields
         return merged

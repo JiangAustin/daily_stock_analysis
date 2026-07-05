@@ -11,16 +11,19 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from private_ext.config import settings
 from private_ext.raw_data import AkShareNotInstalledError, create_raw_data_collector
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
+def main() -> int:
+    args = parse_args()
     try:
         collector = create_raw_data_collector(
             args.raw_data,
             use_cache=True,
             refresh=args.refresh_data,
+            manual_data_dir=args.manual_data_dir,
+            manual_file_format=args.manual_file_format,
         )
     except (AkShareNotInstalledError, NotImplementedError, ValueError) as exc:
         print(str(exc))
@@ -86,6 +89,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Force live fetch for this check and disable cache fallback.",
     )
+    parser.add_argument("--manual-data-dir", default=str(settings.storage_dir / "manual_data"))
+    parser.add_argument("--manual-file-format", choices=["auto", "csv", "json"], default="auto")
     parser.add_argument("--verbose", action="store_true")
     return parser.parse_args(argv)
 
@@ -124,10 +129,6 @@ def _print_verbose(symbol: str, quality: dict[str, object]) -> None:
     print("cache_success_count:", quality.get("cache_success_count", 0))
     print("live_failure_count:", quality.get("live_failure_count", 0))
     print("failed_sources:", ",".join(quality.get("failed_sources", [])) or "-")
-    manual_override = quality.get("manual_override") or quality.get("provider_reports", {}).get("manual_override", {})
-    if manual_override:
-        print("manual_override:")
-        print(json.dumps(manual_override, ensure_ascii=False, indent=2, sort_keys=True))
     print("field_provenance_summary:")
     print(
         json.dumps(
