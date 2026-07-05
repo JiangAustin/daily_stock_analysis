@@ -18,6 +18,18 @@ def main() -> int:
     print()
     for table, count in repo.table_counts().items():
         print(f"{table}: {count}")
+    latest_runs = repo.latest_runs()
+    if latest_runs:
+        print()
+        print("Latest Runs:")
+        for run in latest_runs:
+            line = (
+                f"{run['run_date']} {run['symbol']} {run['raw_data_provider']} "
+                f"{run['research_adapter']} {run['status']}"
+            )
+            if run.get("error_message"):
+                line += f" error={run['error_message']}"
+            print(line)
     latest_nav = repo.latest_nav()
     if latest_nav:
         print()

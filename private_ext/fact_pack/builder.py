@@ -1,53 +1,89 @@
 from private_ext.fact_pack.models import StockFactPack
-from private_ext.fact_pack.validators import missing_keys
+from private_ext.fact_pack.validators import is_missing, missing_keys
 from private_ext.raw_data.models import RawStockData
 
 
 class FactPackBuilder:
     def build(self, raw: RawStockData) -> StockFactPack:
-        missing = []
-        missing.extend(missing_keys(raw.basic_info, ["name", "industry"], "basic_info"))
-        missing.extend(missing_keys(raw.market_snapshot, ["close"], "market_snapshot"))
-        missing.extend(missing_keys(raw.valuation_raw, ["pe", "pb"], "valuation_raw"))
+        basic_info = raw.basic_info or {}
+        market_snapshot = raw.market_snapshot or {}
+        valuation_raw = raw.valuation_raw or {}
+        financial_raw = raw.financial_raw or {}
+        capital_flow_raw = raw.capital_flow_raw or {}
+        northbound_raw = raw.northbound_raw or {}
+        dragon_tiger_raw = raw.dragon_tiger_raw or {}
+        announcements_raw = raw.announcements_raw or []
+        news_raw = raw.news_raw or []
+        industry_raw = raw.industry_raw or {}
+        metadata = raw.metadata or {}
 
-        warnings = []
-        if not raw.announcements_raw:
+        missing = []
+        missing.extend(missing_keys(basic_info, ["name", "industry"], "basic_info"))
+        missing.extend(missing_keys(market_snapshot, ["close"], "market_snapshot"))
+        missing.extend(missing_keys(valuation_raw, ["pe", "pb"], "valuation_raw"))
+        missing.extend(missing_keys(financial_raw, ["roe"], "financial_raw"))
+        missing.extend(str(item) for item in metadata.get("missing_fields", []) if item)
+
+        warnings = list(dict.fromkeys(str(item) for item in metadata.get("data_quality_warnings", []) if item))
+        if not announcements_raw:
             warnings.append("announcement_evidence_missing")
+        if not news_raw:
+            warnings.append("news_evidence_missing")
         if len(missing) >= 3:
             warnings.append("core_fields_missing")
 
-        risk_facts = [{"risk": item, "severity": "medium"} for item in raw.metadata.get("risk_events", [])]
-        if raw.valuation_raw.get("pe", 0) >= 35:
+        risk_facts = [{"risk": item, "severity": "medium"} for item in metadata.get("risk_events", []) if item]
+        pe_value = valuation_raw.get("pe")
+        if isinstance(pe_value, (int, float)) and pe_value >= 35:
             risk_facts.append({"risk": "高估值", "severity": "medium"})
+        if missing:
+            risk_facts.append({"risk": "部分真实数据缺失", "severity": "low"})
+
+        growth_facts = {
+            "revenue_growth": financial_raw.get("revenue_growth"),
+            "profit_growth": financial_raw.get("profit_growth"),
+            "industry_prosperity": industry_raw.get("prosperity"),
+        }
+        profitability_facts = {
+            "roe": financial_raw.get("roe"),
+            "gross_margin": financial_raw.get("gross_margin"),
+            "net_margin": financial_raw.get("net_margin"),
+        }
+        balance_sheet_facts = {"debt_ratio": financial_raw.get("debt_ratio")}
+        cashflow_facts = {
+            "operating_cashflow_quality": financial_raw.get("operating_cashflow_quality"),
+            "operating_cashflow": financial_raw.get("operating_cashflow"),
+        }
+        capital_flow_facts = {
+            "main_net_inflow": capital_flow_raw.get("main_net_inflow"),
+            "northbound_net_inflow": northbound_raw.get("net_inflow"),
+            "dragon_tiger": dragon_tiger_raw,
+            "super_large_net_inflow": capital_flow_raw.get("super_large_net_inflow"),
+            "large_net_inflow": capital_flow_raw.get("large_net_inflow"),
+            "mid_net_inflow": capital_flow_raw.get("mid_net_inflow"),
+            "small_net_inflow": capital_flow_raw.get("small_net_inflow"),
+        }
+
+        if is_missing(market_snapshot.get("close")):
+            warnings.append("close_price_missing")
+        if is_missing(financial_raw.get("roe")):
+            warnings.append("financial_roe_missing")
 
         return StockFactPack(
             symbol=raw.symbol,
             trade_date=raw.trade_date,
-            identity={**raw.basic_info},
-            price_facts={**raw.market_snapshot},
-            valuation_facts={**raw.valuation_raw},
-            growth_facts={
-                "revenue_growth": raw.financial_raw.get("revenue_growth"),
-                "profit_growth": raw.financial_raw.get("profit_growth"),
-                "industry_prosperity": raw.industry_raw.get("prosperity"),
-            },
-            profitability_facts={
-                "roe": raw.financial_raw.get("roe"),
-                "gross_margin": raw.financial_raw.get("gross_margin"),
-                "net_margin": raw.financial_raw.get("net_margin"),
-            },
-            balance_sheet_facts={"debt_ratio": raw.financial_raw.get("debt_ratio")},
-            cashflow_facts={"operating_cashflow_quality": raw.financial_raw.get("operating_cashflow_quality")},
-            capital_flow_facts={
-                "main_net_inflow": raw.capital_flow_raw.get("main_net_inflow"),
-                "northbound_net_inflow": raw.northbound_raw.get("net_inflow"),
-                "dragon_tiger": raw.dragon_tiger_raw,
-            },
-            technical_facts={**raw.kline_summary},
-            announcement_facts=raw.announcements_raw,
-            news_facts=raw.news_raw,
+            identity={**basic_info},
+            price_facts={**market_snapshot},
+            valuation_facts={**valuation_raw},
+            growth_facts=growth_facts,
+            profitability_facts=profitability_facts,
+            balance_sheet_facts=balance_sheet_facts,
+            cashflow_facts=cashflow_facts,
+            capital_flow_facts=capital_flow_facts,
+            technical_facts={**(raw.kline_summary or {})},
+            announcement_facts=announcements_raw,
+            news_facts=news_raw,
             risk_facts=risk_facts,
-            missing_fields=missing,
-            data_quality_warnings=warnings,
+            missing_fields=list(dict.fromkeys(missing)),
+            data_quality_warnings=list(dict.fromkeys(warnings)),
         )
-

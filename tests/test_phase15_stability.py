@@ -1,8 +1,21 @@
 from pathlib import Path
+import importlib.util
 import subprocess
+import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def load_acceptance_module():
+    module_path = ROOT / "scripts/run_acceptance.py"
+    spec = importlib.util.spec_from_file_location("run_acceptance_for_test", module_path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def test_phase15_acceptance_assets_exist():
@@ -116,6 +129,43 @@ def test_core_acceptance_test_whitelist_excludes_full_repo_tests():
         assert test_path in script
 
     assert '["tests"]' not in script
+
+
+def test_full_tests_failure_is_blocking_when_requested(monkeypatch, capsys):
+    acceptance = load_acceptance_module()
+
+    def fake_run_command(name, command, fail_status="FAIL"):
+        if name == "FULL TESTS":
+            return acceptance.CheckResult(name, fail_status, "exited with 1")
+        return acceptance.CheckResult(name, "PASS")
+
+    monkeypatch.setattr(acceptance, "run_command", fake_run_command)
+    monkeypatch.setattr(
+        acceptance,
+        "verify_deterministic_outputs",
+        lambda: acceptance.CheckResult("DETERMINISTIC", "PASS"),
+    )
+    monkeypatch.setattr(
+        acceptance,
+        "verify_gitignore",
+        lambda: acceptance.CheckResult("STORAGE IGNORE", "PASS"),
+    )
+    monkeypatch.setattr(
+        acceptance,
+        "verify_docs",
+        lambda: acceptance.CheckResult("DOCS", "PASS"),
+    )
+    monkeypatch.setattr(
+        acceptance,
+        "run_pip_check",
+        lambda strict_env: acceptance.CheckResult("PIP CHECK", "PASS"),
+    )
+
+    exit_code = acceptance.main(["--full-tests"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 1
+    assert "FULL TESTS: FULL_TESTS_FAILED" in output
 
 
 def test_architecture_and_contract_docs_describe_phase15_boundaries():

@@ -80,13 +80,7 @@ def run_command(name: str, command: list[str], fail_status: str = "FAIL") -> Che
         command,
         cwd=ROOT,
         check=False,
-        text=True,
-        capture_output=True,
     )
-    if result.stdout:
-        print(result.stdout, end="")
-    if result.stderr:
-        print(result.stderr, end="", file=sys.stderr)
     if result.returncode != 0:
         return CheckResult(name, fail_status, f"exited with {result.returncode}")
     return CheckResult(name, "PASS")
@@ -217,6 +211,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Treat pip check failures as blocking environment failures.",
     )
+    parser.add_argument(
+        "--realdata-smoke",
+        action="store_true",
+        help="Optionally run the non-default real-data smoke script.",
+    )
     return parser.parse_args(argv)
 
 
@@ -290,6 +289,8 @@ def main(argv: list[str] | None = None) -> int:
                 fail_status="FULL_TESTS_FAILED",
             )
         )
+    if args.realdata_smoke:
+        results.append(run_command("REALDATA SMOKE", [PYTHON, "scripts/run_realdata_smoke.py"]))
 
     print_summary(results, full_tests_requested=args.full_tests)
 
@@ -305,6 +306,12 @@ def main(argv: list[str] | None = None) -> int:
         if result.name in core_blockers and result.status == "FAIL":
             return 1
         if result.name == "PIP CHECK" and args.strict_env and result.status == "FAIL":
+            return 1
+        if (
+            result.name == "FULL TESTS"
+            and args.full_tests
+            and result.status == "FULL_TESTS_FAILED"
+        ):
             return 1
     return 0
 

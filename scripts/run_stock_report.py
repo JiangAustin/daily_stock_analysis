@@ -18,7 +18,7 @@ from private_ext.decisions.risk_gate import RiskGate
 from private_ext.fact_pack.builder import FactPackBuilder
 from private_ext.paper_trading.broker import PaperBroker
 from private_ext.paper_trading.models import PaperTradeExecution
-from private_ext.raw_data.mock_collector import MockRawDataCollector
+from private_ext.raw_data import AkShareNotInstalledError, create_raw_data_collector
 from private_ext.reports.stock_report import render_stock_report
 from private_ext.research.mock_adapter import MockResearchAdapter
 from private_ext.scoring.total import ScoreEngine
@@ -27,17 +27,21 @@ from private_ext.utils.logger import setup_run_logger
 
 def main() -> int:
     args = _parse_args()
-    if args.raw_data != "mock":
-        raise SystemExit("Phase 1 only supports --raw-data mock")
     if args.research_adapter != "mock":
-        raise SystemExit("Phase 1 only supports --research-adapter mock")
+        raise SystemExit("Phase 2 only supports --research-adapter mock")
 
     _ensure_dirs()
     init_db(settings)
     repo = ResearchRepository(settings.db_path)
     logger = setup_run_logger(settings.logs_dir, args.trade_date)
 
-    collector = MockRawDataCollector()
+    try:
+        collector = create_raw_data_collector(args.raw_data)
+    except AkShareNotInstalledError as exc:
+        raise SystemExit(str(exc)) from exc
+    except (NotImplementedError, ValueError) as exc:
+        raise SystemExit(str(exc)) from exc
+
     fact_builder = FactPackBuilder()
     score_engine = ScoreEngine()
     research_adapter = MockResearchAdapter()
@@ -47,21 +51,22 @@ def main() -> int:
 
     stocks = [stock.strip() for stock in args.stocks.split(",") if stock.strip()]
     reports = []
+    failures = []
     for symbol in stocks:
         run_id = repo.create_run(args.trade_date, symbol, collector.provider, research_adapter.adapter)
         logger.info("start symbol=%s run_id=%s", symbol, run_id)
         try:
             raw = collector.collect(symbol, args.trade_date)
             repo.save_raw_data(run_id, raw, collector.provider)
-            _write_json(settings.raw_dir / f"{symbol}_{args.trade_date}.json", raw.model_dump())
+            _write_json(settings.raw_dir / f"{symbol}_{args.trade_date}.json", raw.model_dump(mode="json"))
 
             fact_pack = fact_builder.build(raw)
             repo.save_fact_pack(run_id, fact_pack)
-            _write_json(settings.fact_pack_dir / f"{symbol}_{args.trade_date}.json", fact_pack.model_dump())
+            _write_json(settings.fact_pack_dir / f"{symbol}_{args.trade_date}.json", fact_pack.model_dump(mode="json"))
 
             scorecard = score_engine.score(fact_pack)
             repo.save_scorecard(run_id, scorecard)
-            _write_json(settings.scorecard_dir / f"{symbol}_{args.trade_date}.json", scorecard.model_dump())
+            _write_json(settings.scorecard_dir / f"{symbol}_{args.trade_date}.json", scorecard.model_dump(mode="json"))
 
             research_output = research_adapter.analyze(fact_pack, scorecard)
             repo.save_research_output(run_id, research_output)
@@ -89,21 +94,32 @@ def main() -> int:
         except Exception as exc:
             repo.finish_run(run_id, status="failed", error_message=str(exc))
             logger.exception("failed symbol=%s", symbol)
-            raise
+            failures.append((symbol, str(exc)))
+            continue
 
     if args.paper_trading == "on":
         paper_broker.mark_to_market(args.trade_date)
+
+    if not reports:
+        print("Stock report run failed for all requested stocks.")
+        for symbol, error in failures:
+            print(f"- {symbol}: {error}")
+        return 1
 
     print("Stock report MVP completed.")
     print(f"Date: {args.trade_date}")
     print(f"Stocks: {','.join(stocks)}")
     print(f"Reports: {settings.reports_dir}/")
     print(f"Database: {settings.db_path}")
+    if failures:
+        print("Failed Stocks:")
+        for symbol, error in failures:
+            print(f"- {symbol}: {error}")
     return 0
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run Mock A-share research report MVP.")
+    parser = argparse.ArgumentParser(description="Run A-share research report pipeline.")
     parser.add_argument("--stocks", required=True)
     parser.add_argument("--date", dest="trade_date", required=True)
     parser.add_argument("--raw-data", default=settings.default_raw_data)
@@ -132,4 +148,3 @@ def _write_json(path: Path, payload: dict) -> None:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

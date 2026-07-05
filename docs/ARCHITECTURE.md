@@ -1,6 +1,6 @@
 # ashare-research-os Architecture
 
-本文档描述当前 Phase 1.5 的 Mock MVP 架构。目标是固化可重复、可回归的 A 股 AI 投研决策流水线，不接真实行情、不接真实 LLM、不接 TradingAgents-astock、不开发前端。
+本文档描述当前 Mock MVP 与 Phase 2 Real Data 的总体边界。目标是固化可重复、可回归的 A 股 AI 投研决策流水线；Phase 2 只接真实 Raw Data Provider，不接真实 LLM、不接 TradingAgents-astock、不开发前端。
 
 ## Pipeline
 
@@ -18,7 +18,7 @@ Raw Data
 ## 模块边界
 
 - `scripts/run_stock_report.py`：唯一 MVP 验收入口，负责串联 Mock 原始数据、事实包、评分、决策、风控、报告、模拟交易和 SQLite 写入。
-- `private_ext/raw_data/`：原始数据采集接口与 Mock 数据实现。当前只允许 `mock`。
+- `private_ext/raw_data/`：原始数据采集接口与实现，当前支持 `mock`，并新增 `akshare` 作为 Phase 2 真实 A 股 Raw Data Provider。
 - `private_ext/fact_pack/`：将 Raw Data 归一化为可评分的事实包。
 - `private_ext/scoring/`：把 Fact Pack 转为 StockScorecard。
 - `private_ext/research/`：研究适配器接口与 Mock 研究输出。当前不接真实 LLM。
@@ -76,6 +76,6 @@ python scripts/run_acceptance.py --strict-env
 
 ## 后续阶段边界
 
-- Phase 2 才接单一真实 A 股数据 Provider，但仍输出 RawStockData 并复用后续链路。
+- Phase 2 接单一真实 A 股数据 Provider，但仍输出 RawStockData 并复用后续链路；默认验收仍以 Mock acceptance 为准，真实数据只通过独立 smoke 验证。
 - Phase 3 才接公告证据链。
 - Phase 4 才接 TradingAgents-astock，并只用于重点股票深度分析。

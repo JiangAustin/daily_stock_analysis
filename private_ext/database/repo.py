@@ -40,7 +40,7 @@ class ResearchRepository:
                 INSERT INTO raw_data_snapshots (run_id, symbol, trade_date, provider, raw_json)
                 VALUES (?, ?, ?, ?, ?)
                 """,
-                (run_id, raw.symbol, raw.trade_date, provider, _json(raw.model_dump())),
+                (run_id, raw.symbol, raw.trade_date, provider, _json(raw.model_dump(mode="json"))),
             )
             return int(cursor.lastrowid)
 
@@ -57,7 +57,7 @@ class ResearchRepository:
                     run_id,
                     fact_pack.symbol,
                     fact_pack.trade_date,
-                    _json(fact_pack.model_dump()),
+                    _json(fact_pack.model_dump(mode="json")),
                     _json(fact_pack.missing_fields),
                     _json(fact_pack.data_quality_warnings),
                 ),
@@ -79,7 +79,7 @@ class ResearchRepository:
                     scorecard.trade_date,
                     scorecard.total_score,
                     scorecard.rating_band,
-                    _json(scorecard.model_dump()),
+                    _json(scorecard.model_dump(mode="json")),
                     _json(scorecard.penalty_reasons),
                 ),
             )
@@ -122,7 +122,7 @@ class ResearchRepository:
                     _json(decision.catalysts),
                     _json(decision.risks),
                     _json(decision.invalidation_conditions),
-                    _json(decision.model_dump()),
+                    _json(decision.model_dump(mode="json")),
                 ),
             )
             return int(cursor.lastrowid)
@@ -221,11 +221,24 @@ class ResearchRepository:
             ).fetchone()
             return dict(row) if row else None
 
+    def latest_runs(self, limit: int = 5) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """
+                SELECT run_date, symbol, raw_data_provider, research_adapter, status, error_message
+                FROM research_runs
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
     def _connect(self) -> sqlite3.Connection:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         return sqlite3.connect(self.db_path)
 
 
 def _json(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True)
-
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
