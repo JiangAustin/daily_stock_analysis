@@ -144,6 +144,39 @@ def test_eastmoney_collector_treats_zero_kline_return_as_present(tmp_path):
     assert provenance["kline_summary.return_20d"]["candidate"] is not None
 
 
+def test_eastmoney_collector_treats_zero_valuation_fields_as_present(tmp_path):
+    from private_ext.raw_data.eastmoney_collector import EastMoneyRawDataCollector
+
+    collector = EastMoneyRawDataCollector(
+        cache_dir=tmp_path,
+        use_cache=False,
+        refresh=True,
+        fetchers={
+            "snapshot": lambda symbol: [{"f57": "600519", "f58": "贵州茅台", "f9": 0, "f23": 0}],
+            "valuation": lambda symbol: [],
+            "kline": lambda symbol, trade_date: [
+                {"date": "2026-06-30", "close": 10.0},
+                {"date": "2026-07-01", "close": 10.0},
+                {"date": "2026-07-02", "close": 10.0},
+                {"date": "2026-07-03", "close": 10.0},
+                {"date": "2026-07-04", "close": 10.0},
+                {"date": "2026-07-05", "close": 10.0},
+            ],
+            "financial": lambda symbol: [],
+        },
+    )
+
+    raw = collector.collect("600519", "2026-07-03")
+    provenance = raw.metadata["field_provenance"]
+
+    assert raw.valuation_raw["pe"] == 0.0
+    assert raw.valuation_raw["pb"] == 0.0
+    assert "valuation_raw.pe" not in raw.metadata["eastmoney_diagnostics"]["unresolved_fields"]
+    assert "valuation_raw.pb" not in raw.metadata["eastmoney_diagnostics"]["unresolved_fields"]
+    assert provenance["valuation_raw.pe"]["candidate"] == "eastmoney_push2_snapshot"
+    assert provenance["valuation_raw.pb"]["candidate"] == "eastmoney_push2_snapshot"
+
+
 def test_eastmoney_collector_marks_kline_fallback_provenance_with_candidate(tmp_path):
     from private_ext.raw_data.eastmoney_collector import EastMoneyRawDataCollector
 
