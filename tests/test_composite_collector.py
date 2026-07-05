@@ -109,19 +109,19 @@ def test_composite_collector_merges_primary_and_secondary():
         provider = "akshare"
 
         def collect(self, symbol: str, trade_date: str) -> RawStockData:
-            return _raw("akshare", close=None, return_20d=None, pe=24.0)
+            return _raw("akshare", close=1500.0, return_20d=None, pe=24.0)
 
     class Secondary:
         provider = "eastmoney"
 
         def collect(self, symbol: str, trade_date: str) -> RawStockData:
-            return _raw("eastmoney", close=1501.0, return_20d=0.12, pe=24.2)
+            return _raw("eastmoney", close=None, return_20d=0.12, pe=24.2)
 
     collector = CompositeRawDataCollector(primary=Primary(), secondary=Secondary())
     raw = collector.collect("600519", "2026-07-03")
 
     assert isinstance(raw, RawStockData)
-    assert raw.market_snapshot["close"] == 1501.0
+    assert raw.market_snapshot["close"] == 1500.0
     assert raw.kline_summary["return_20d"] == 0.12
     assert raw.metadata["provider"] == "composite"
     assert raw.metadata["providers_used"] == ["akshare", "eastmoney"]
@@ -130,6 +130,8 @@ def test_composite_collector_merges_primary_and_secondary():
     assert "quality_report" in raw.metadata
     assert "diagnostics" in raw.metadata["provider_reports"]["eastmoney"]
     assert raw.metadata["quality_report"]["provider_reports"]["eastmoney"]["diagnostics"]["successful_endpoints"] == ["snapshot"]
+    assert raw.metadata["field_provenance"]["market_snapshot.close"]["source"] == "akshare_snapshot"
+    assert raw.metadata["field_provenance"]["kline_summary.return_20d"]["source"] == "eastmoney_kline"
 
 
 def test_factory_creates_eastmoney_and_composite_collectors():

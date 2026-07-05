@@ -85,3 +85,154 @@ def test_private_ext_report_renderer_writes_required_markdown_sections(tmp_path:
     assert "## 数据质量与可用性" in report
     assert "## 9. 风险提示" in report
     assert "不构成投资建议" in report
+
+
+def test_private_ext_report_renderer_skips_none_actual_data_date_notice(tmp_path: Path):
+    fact_pack = StockFactPack(
+        symbol="600519",
+        trade_date="2026-07-03",
+        identity={"name": "贵州茅台", "industry": "白酒"},
+        price_facts={"close": 1500.0},
+        valuation_facts={"pe": 28.0},
+        growth_facts={},
+        profitability_facts={},
+        balance_sheet_facts={},
+        cashflow_facts={},
+        capital_flow_facts={},
+        technical_facts={},
+        announcement_facts=[],
+        news_facts=[],
+        risk_facts=[],
+        metadata={"quality_level": "good", "actual_data_date": None},
+    )
+    scorecard = StockScorecard(
+        symbol="600519",
+        trade_date="2026-07-03",
+        valuation_score=70,
+        growth_score=60,
+        profitability_score=90,
+        financial_health_score=80,
+        capital_flow_score=70,
+        technical_score=70,
+        sentiment_score=65,
+        risk_score=85,
+        total_score=75,
+        rating_band="positive",
+        score_explanations={key: "ok" for key in (
+            "valuation",
+            "growth",
+            "profitability",
+            "financial_health",
+            "capital_flow",
+            "technical",
+            "sentiment",
+            "risk",
+        )},
+    )
+    decision = InvestmentDecision(
+        symbol="600519",
+        trade_date="2026-07-03",
+        rating="neutral-bullish",
+        action="watch",
+        confidence=0.68,
+        target_position=0.02,
+        horizon="20d",
+        thesis="watch for confirmation",
+        bullish_points=["profitability"],
+        bearish_points=["valuation"],
+        catalysts=["demand recovery"],
+        risks=["valuation compression"],
+        invalidation_conditions=["growth slows"],
+        aggressive_plan="small position",
+        balanced_plan="watch",
+        conservative_plan="wait",
+    )
+    execution = PaperTradeExecution(
+        action="watch",
+        price=1500.0,
+        quantity=0,
+        amount=0,
+        fee=0,
+        executed=False,
+        reason="watch only",
+    )
+
+    report = render_stock_report(fact_pack, scorecard, decision, execution, tmp_path).read_text(encoding="utf-8")
+
+    assert "与请求日期" not in report
+    assert "实际数据日期 | None" in report
+
+
+def test_private_ext_report_renderer_warns_only_on_real_actual_data_date_mismatch(tmp_path: Path):
+    fact_pack = StockFactPack(
+        symbol="600519",
+        trade_date="2026-07-03",
+        identity={"name": "贵州茅台", "industry": "白酒"},
+        price_facts={"close": 1500.0},
+        valuation_facts={"pe": 28.0},
+        growth_facts={},
+        profitability_facts={},
+        balance_sheet_facts={},
+        cashflow_facts={},
+        capital_flow_facts={},
+        technical_facts={},
+        announcement_facts=[],
+        news_facts=[],
+        risk_facts=[],
+        metadata={"quality_level": "good", "actual_data_date": "2026-07-01"},
+    )
+    scorecard = StockScorecard(
+        symbol="600519",
+        trade_date="2026-07-03",
+        valuation_score=70,
+        growth_score=60,
+        profitability_score=90,
+        financial_health_score=80,
+        capital_flow_score=70,
+        technical_score=70,
+        sentiment_score=65,
+        risk_score=85,
+        total_score=75,
+        rating_band="positive",
+        score_explanations={key: "ok" for key in (
+            "valuation",
+            "growth",
+            "profitability",
+            "financial_health",
+            "capital_flow",
+            "technical",
+            "sentiment",
+            "risk",
+        )},
+    )
+    decision = InvestmentDecision(
+        symbol="600519",
+        trade_date="2026-07-03",
+        rating="neutral-bullish",
+        action="watch",
+        confidence=0.68,
+        target_position=0.02,
+        horizon="20d",
+        thesis="watch for confirmation",
+        bullish_points=["profitability"],
+        bearish_points=["valuation"],
+        catalysts=["demand recovery"],
+        risks=["valuation compression"],
+        invalidation_conditions=["growth slows"],
+        aggressive_plan="small position",
+        balanced_plan="watch",
+        conservative_plan="wait",
+    )
+    execution = PaperTradeExecution(
+        action="watch",
+        price=1500.0,
+        quantity=0,
+        amount=0,
+        fee=0,
+        executed=False,
+        reason="watch only",
+    )
+
+    report = render_stock_report(fact_pack, scorecard, decision, execution, tmp_path).read_text(encoding="utf-8")
+
+    assert "本报告使用的数据实际日期为 2026-07-01" in report

@@ -40,8 +40,8 @@ def render_stock_report(
         source_cache_notice = "\n> 本报告部分字段使用本地缓存数据，可能不是最新实时数据。\n"
     actual_date_notice = ""
     requested_date = quality.get("requested_date", fact_pack.trade_date)
-    actual_date = quality.get("actual_data_date", "None")
-    if actual_date and requested_date and actual_date != requested_date:
+    actual_date = quality.get("actual_data_date")
+    if actual_date not in (None, "", "None") and requested_date and actual_date != requested_date:
         actual_date_notice = (
             f"\n> 本报告使用的数据实际日期为 {actual_date}，与请求日期 {requested_date} 不完全一致。\n"
         )

@@ -1,0 +1,39 @@
+name: private-ext-ci
+
+on:
+  pull_request:
+    paths:
+      - 'private_ext/**'
+      - 'scripts/**'
+      - 'tests/**'
+      - 'docs/**'
+      - '.github/workflows/private-ext-ci.yml'
+      - '.gitignore'
+
+concurrency:
+  group: private-ext-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  private-ext:
+    name: private-ext
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r .github/requirements-ci.txt
+
+      - name: Run private tests
+        run: python scripts/run_private_tests.py
+
+      - name: Run acceptance
+        run: python scripts/run_acceptance.py

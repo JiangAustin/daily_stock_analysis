@@ -46,6 +46,15 @@ def test_snapshot_parser_handles_missing_markers():
     assert parsed["fields"]["pb"] is None
 
 
+def test_snapshot_parser_keeps_zero_pct_change():
+    from private_ext.raw_data.eastmoney_parsers import parse_snapshot_payload
+
+    parsed = parse_snapshot_payload({"f43": 150000, "f170": 0, "f168": 0})
+
+    assert parsed["fields"]["pct_change"] == 0.0
+    assert "pct_change" in parsed["fields_found"]
+
+
 def test_kline_parser_computes_return20d_from_list_str():
     from private_ext.raw_data.eastmoney_parsers import parse_kline_payload
 

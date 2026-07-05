@@ -42,6 +42,7 @@ class EastMoneyRawDataCollector(RawDataCollector):
         failed_sources = context["failed_sources"]
         successful_sources = context["successful_sources"]
         source_cache_used = context["source_cache_used"]
+        group_cache_hit = context["group_cache_hit"]
         source_payloads = context["source_payloads"]
         field_provenance: dict[str, dict[str, Any]] = {}
         live_success_count = context["live_success_count"]
@@ -54,30 +55,68 @@ class EastMoneyRawDataCollector(RawDataCollector):
         kline_fields = context["group_fields"].get("kline", {})
         financial_fields = context["group_fields"].get("financial", {})
 
+        close, close_source, close_fallback_level = first_non_missing_with_source(
+            ("eastmoney_snapshot", snapshot_fields.get("close"), 0),
+            ("eastmoney_kline", kline_fields.get("close"), 1),
+        )
+        pct_change, pct_change_source, pct_change_fallback_level = first_non_missing_with_source(
+            ("eastmoney_snapshot", snapshot_fields.get("pct_change"), 0),
+            ("eastmoney_kline", kline_fields.get("pct_change"), 1),
+        )
+        turnover_rate, turnover_rate_source, turnover_rate_fallback_level = first_non_missing_with_source(
+            ("eastmoney_snapshot", snapshot_fields.get("turnover_rate"), 0),
+        )
+        market_cap, market_cap_source, market_cap_fallback_level = first_non_missing_with_source(
+            ("eastmoney_snapshot", snapshot_fields.get("market_cap"), 0),
+        )
+        pe, pe_source, pe_fallback_level = first_non_missing_with_source(
+            ("eastmoney_snapshot", snapshot_fields.get("pe"), 0),
+            ("eastmoney_valuation", valuation_fields.get("pe"), 0),
+        )
+        pb, pb_source, pb_fallback_level = first_non_missing_with_source(
+            ("eastmoney_snapshot", snapshot_fields.get("pb"), 0),
+            ("eastmoney_valuation", valuation_fields.get("pb"), 0),
+        )
+        roe, roe_source, roe_fallback_level = first_non_missing_with_source(
+            ("eastmoney_financial", financial_fields.get("roe"), 0),
+        )
+        net_profit_growth, net_profit_growth_source, net_profit_growth_fallback_level = first_non_missing_with_source(
+            ("eastmoney_financial", financial_fields.get("net_profit_growth"), 0),
+        )
+        return_5d, return_5d_source, return_5d_fallback_level = first_non_missing_with_source(
+            ("eastmoney_kline", kline_fields.get("return_5d"), 0),
+        )
+        return_20d, return_20d_source, return_20d_fallback_level = first_non_missing_with_source(
+            ("eastmoney_kline", kline_fields.get("return_20d"), 0),
+        )
+        return_60d, return_60d_source, return_60d_fallback_level = first_non_missing_with_source(
+            ("eastmoney_kline", kline_fields.get("return_60d"), 0),
+        )
+
         market_snapshot = {
-            "close": snapshot_fields.get("close") or kline_fields.get("close"),
-            "pct_change": snapshot_fields.get("pct_change") or kline_fields.get("pct_change"),
-            "turnover_rate": snapshot_fields.get("turnover_rate"),
-            "market_cap": snapshot_fields.get("market_cap"),
+            "close": first_non_missing(snapshot_fields.get("close"), kline_fields.get("close")),
+            "pct_change": first_non_missing(snapshot_fields.get("pct_change"), kline_fields.get("pct_change")),
+            "turnover_rate": first_non_missing(snapshot_fields.get("turnover_rate")),
+            "market_cap": first_non_missing(snapshot_fields.get("market_cap")),
             "currency": "CNY",
         }
         valuation_raw = {
-            "pe": snapshot_fields.get("pe") if snapshot_fields.get("pe") is not None else valuation_fields.get("pe"),
-            "pb": snapshot_fields.get("pb") if snapshot_fields.get("pb") is not None else valuation_fields.get("pb"),
+            "pe": first_non_missing(snapshot_fields.get("pe"), valuation_fields.get("pe")),
+            "pb": first_non_missing(snapshot_fields.get("pb"), valuation_fields.get("pb")),
         }
         financial_raw = {
-            "roe": financial_fields.get("roe"),
-            "net_profit_growth": financial_fields.get("net_profit_growth"),
+            "roe": first_non_missing(financial_fields.get("roe")),
+            "net_profit_growth": first_non_missing(financial_fields.get("net_profit_growth")),
         }
         kline_summary = {
-            "return_5d": kline_fields.get("return_5d"),
-            "return_20d": kline_fields.get("return_20d"),
-            "return_60d": kline_fields.get("return_60d"),
-            "pct_change_5d": kline_fields.get("return_5d"),
-            "pct_change_20d": kline_fields.get("return_20d"),
-            "pct_change_60d": kline_fields.get("return_60d"),
-            "latest_close": kline_fields.get("close"),
-            "latest_pct_change": kline_fields.get("pct_change"),
+            "return_5d": first_non_missing(kline_fields.get("return_5d")),
+            "return_20d": first_non_missing(kline_fields.get("return_20d")),
+            "return_60d": first_non_missing(kline_fields.get("return_60d")),
+            "pct_change_5d": first_non_missing(kline_fields.get("return_5d")),
+            "pct_change_20d": first_non_missing(kline_fields.get("return_20d")),
+            "pct_change_60d": first_non_missing(kline_fields.get("return_60d")),
+            "latest_close": first_non_missing(kline_fields.get("close")),
+            "latest_pct_change": first_non_missing(kline_fields.get("pct_change")),
             "actual_data_date": kline_fields.get("actual_data_date"),
             "close_series_length": len(context["kline_rows"]),
             "return_available_window": kline_fields.get("return_available_window", 0),
@@ -90,59 +129,64 @@ class EastMoneyRawDataCollector(RawDataCollector):
         actual_data_date = kline_summary.get("actual_data_date") or context["basic_info"].get("report_date")
 
         field_provenance["market_snapshot.close"] = build_field_provenance(
-            source="eastmoney_snapshot" if market_snapshot["close"] is not None else None,
-            fallback_level=0,
-            is_cached="snapshot" in source_cache_used,
-            confidence="high" if market_snapshot["close"] is not None else "missing",
+            source=close_source,
+            fallback_level=close_fallback_level,
+            is_cached=bool(close_source and group_cache_hit.get(_group_name_for_source(close_source), False)),
+            confidence="high" if close is not None else "missing",
         )
         field_provenance["market_snapshot.pct_change"] = build_field_provenance(
-            source="eastmoney_snapshot" if market_snapshot["pct_change"] is not None else None,
-            fallback_level=0,
-            is_cached="snapshot" in source_cache_used,
-            confidence="high" if market_snapshot["pct_change"] is not None else "missing",
+            source=pct_change_source,
+            fallback_level=pct_change_fallback_level,
+            is_cached=bool(pct_change_source and group_cache_hit.get(_group_name_for_source(pct_change_source), False)),
+            confidence="high" if pct_change is not None else "missing",
         )
         field_provenance["market_snapshot.turnover_rate"] = build_field_provenance(
-            source="eastmoney_snapshot" if market_snapshot["turnover_rate"] is not None else None,
-            fallback_level=0,
-            is_cached="snapshot" in source_cache_used,
-            confidence="high" if market_snapshot["turnover_rate"] is not None else "missing",
+            source=turnover_rate_source,
+            fallback_level=turnover_rate_fallback_level,
+            is_cached=bool(turnover_rate_source and group_cache_hit.get(_group_name_for_source(turnover_rate_source), False)),
+            confidence="high" if turnover_rate is not None else "missing",
         )
         field_provenance["market_snapshot.market_cap"] = build_field_provenance(
-            source="eastmoney_snapshot" if market_snapshot["market_cap"] is not None else None,
-            fallback_level=0,
-            is_cached="snapshot" in source_cache_used,
-            confidence="high" if market_snapshot["market_cap"] is not None else "missing",
+            source=market_cap_source,
+            fallback_level=market_cap_fallback_level,
+            is_cached=bool(market_cap_source and group_cache_hit.get(_group_name_for_source(market_cap_source), False)),
+            confidence="high" if market_cap is not None else "missing",
         )
         field_provenance["valuation_raw.pe"] = build_field_provenance(
-            source="eastmoney_valuation" if valuation_raw["pe"] is not None else None,
-            fallback_level=0,
-            is_cached="valuation" in source_cache_used,
-            confidence="high" if valuation_raw["pe"] is not None else "missing",
+            source=pe_source,
+            fallback_level=pe_fallback_level,
+            is_cached=bool(pe_source and group_cache_hit.get(_group_name_for_source(pe_source), False)),
+            confidence="high" if pe is not None else "missing",
         )
         field_provenance["valuation_raw.pb"] = build_field_provenance(
-            source="eastmoney_valuation" if valuation_raw["pb"] is not None else None,
-            fallback_level=0,
-            is_cached="valuation" in source_cache_used,
-            confidence="high" if valuation_raw["pb"] is not None else "missing",
+            source=pb_source,
+            fallback_level=pb_fallback_level,
+            is_cached=bool(pb_source and group_cache_hit.get(_group_name_for_source(pb_source), False)),
+            confidence="high" if pb is not None else "missing",
         )
         field_provenance["financial_raw.roe"] = build_field_provenance(
-            source="eastmoney_financial" if financial_raw["roe"] is not None else None,
-            fallback_level=0,
-            is_cached="financial" in source_cache_used,
-            confidence="high" if financial_raw["roe"] is not None else "missing",
+            source=roe_source,
+            fallback_level=roe_fallback_level,
+            is_cached=bool(roe_source and group_cache_hit.get(_group_name_for_source(roe_source), False)),
+            confidence="high" if roe is not None else "missing",
         )
         field_provenance["financial_raw.net_profit_growth"] = build_field_provenance(
-            source="eastmoney_financial" if financial_raw["net_profit_growth"] is not None else None,
-            fallback_level=0,
-            is_cached="financial" in source_cache_used,
-            confidence="high" if financial_raw["net_profit_growth"] is not None else "missing",
+            source=net_profit_growth_source,
+            fallback_level=net_profit_growth_fallback_level,
+            is_cached=bool(net_profit_growth_source and group_cache_hit.get(_group_name_for_source(net_profit_growth_source), False)),
+            confidence="high" if net_profit_growth is not None else "missing",
         )
-        for key in ("return_5d", "return_20d", "return_60d"):
+        kline_source_map = {
+            "return_5d": (return_5d_source, return_5d_fallback_level, return_5d),
+            "return_20d": (return_20d_source, return_20d_fallback_level, return_20d),
+            "return_60d": (return_60d_source, return_60d_fallback_level, return_60d),
+        }
+        for key, (source, fallback_level, value) in kline_source_map.items():
             field_provenance[f"kline_summary.{key}"] = build_field_provenance(
-                source="eastmoney_kline" if kline_summary.get(key) is not None else None,
-                fallback_level=0,
-                is_cached="kline" in source_cache_used,
-                confidence="high" if kline_summary.get(key) is not None else "missing",
+                source=source,
+                fallback_level=fallback_level,
+                is_cached=bool(source and group_cache_hit.get(_group_name_for_source(source), False)),
+                confidence="high" if value is not None else "missing",
             )
         field_provenance = summarize_field_provenance(field_provenance)
         quality_report = build_quality_report(
@@ -197,16 +241,16 @@ class EastMoneyRawDataCollector(RawDataCollector):
                 "requested_date": trade_date,
                 "actual_data_date": actual_data_date,
                 "field_provenance": field_provenance,
-                "quality_report": quality_payload,
-                "data_quality_warnings": sorted(set(warnings)),
-                "missing_fields": quality_report.missing_fields,
-                "failed_sources": sorted(set(failed_sources)),
-                "successful_sources": sorted(set(successful_sources)),
-                "source_cache_used": sorted(set(source_cache_used)),
-                "source_payloads": source_payloads,
-                "eastmoney_diagnostics": diagnostics.to_metadata(),
-            },
-        )
+            "quality_report": quality_payload,
+            "data_quality_warnings": sorted(set(warnings)),
+            "missing_fields": quality_report.missing_fields,
+            "failed_sources": sorted(set(failed_sources)),
+            "successful_sources": sorted(set(successful_sources)),
+            "source_cache_used": sorted(set(source_cache_used)),
+            "source_payloads": source_payloads,
+            "eastmoney_diagnostics": diagnostics.to_metadata(),
+        },
+    )
         if self.use_cache:
             self.cache.write(self.provider, normalized_symbol, trade_date, raw)
         return raw
@@ -233,6 +277,7 @@ class EastMoneyRawDataCollector(RawDataCollector):
         failed_sources: list[str] = []
         successful_sources: list[str] = []
         source_cache_used: list[str] = []
+        group_cache_hit: dict[str, bool] = {}
         source_payloads: dict[str, Any] = {}
         candidate_results: list[EastMoneyCandidateResult] = []
         endpoint_results: list[EastMoneyEndpointResult] = []
@@ -286,6 +331,7 @@ class EastMoneyRawDataCollector(RawDataCollector):
                         parsed = candidate.parser(cached_payload)
                         source_cache_used.append(candidate.name)
                         cache_success_count += 1
+                        group_cache_hit[group_name] = True
                         group_fields[group_name] = parsed["fields"]
                         if group_name == "kline":
                             kline_rows = parsed.get("rows", [])
@@ -341,6 +387,7 @@ class EastMoneyRawDataCollector(RawDataCollector):
                 if parsed["fields_found"]:
                     live_success_count += 1
                     successful_sources.append(group_name)
+                    group_cache_hit[group_name] = False
                     group_fields[group_name] = parsed["fields"]
                     if group_name == "kline":
                         kline_rows = parsed.get("rows", [])
@@ -442,6 +489,7 @@ class EastMoneyRawDataCollector(RawDataCollector):
             "failed_sources": sorted(set(failed_sources)),
             "successful_sources": sorted(set(successful_sources)),
             "source_cache_used": sorted(set(source_cache_used)),
+            "group_cache_hit": group_cache_hit,
             "source_payloads": source_payloads,
             "live_success_count": live_success_count,
             "cache_success_count": cache_success_count,
@@ -455,9 +503,33 @@ class EastMoneyRawDataCollector(RawDataCollector):
 def _first_present(payload: dict[str, Any], keys: list[str], fallback: Any = None) -> Any:
     for key in keys:
         value = payload.get(key) if isinstance(payload, dict) else None
-        if value not in (None, "", [], {}):
+        if not _is_missing(value):
             return value
     return fallback
+
+
+def first_non_missing(*values: Any) -> Any:
+    for value in values:
+        if not _is_missing(value):
+            return value
+    return None
+
+
+def first_non_missing_with_source(*values: tuple[str, Any, int]) -> tuple[Any, str | None, int]:
+    for source, value, fallback_level in values:
+        if not _is_missing(value):
+            return value, source, fallback_level
+    return None, None, 0
+
+
+def _group_name_for_source(source: str) -> str:
+    if source in {"eastmoney_snapshot", "eastmoney_kline"}:
+        return "snapshot" if source == "eastmoney_snapshot" else "kline"
+    if source == "eastmoney_valuation":
+        return "valuation"
+    if source == "eastmoney_financial":
+        return "financial"
+    return source
 
 
 def _first_row(payload: Any) -> dict[str, Any]:
@@ -485,3 +557,13 @@ def _normalize_date(value: Any) -> str | None:
 
 def _should_retry_exception(exc: Exception) -> bool:
     return type(exc).__name__ in {"RemoteDisconnected", "TimeoutError", "URLError", "RuntimeError"}
+
+
+def _is_missing(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, float):
+        return value != value
+    if isinstance(value, str):
+        return value.strip() in {"", "-", "N/A", "n/a", "--"}
+    return value in ([], {})
