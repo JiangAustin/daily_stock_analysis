@@ -75,6 +75,34 @@ python scripts/run_realdata_smoke.py
 python scripts/run_realdata_smoke.py --raw-data composite
 ```
 
+手动覆盖 provider：
+
+```bash
+python scripts/run_stock_report.py --stocks 600519 --date 2026-07-03 --raw-data manual_csv --research-adapter mock --paper-trading off
+```
+
+手动文件位置：
+
+- `storage/manual_data/{symbol}_{date}.csv`
+- `storage/manual_data/{symbol}_{date}.json`
+
+手动文件格式：
+
+- `field`
+- `value`
+- `source_note`
+- `source_url`
+- `updated_at`
+- `confidence`
+- `allow_override`
+
+规则：
+
+- 默认只补缺失字段
+- `allow_override=true` 才允许覆盖 live/composite 已有字段
+- `confidence` 仅允许 `low` / `medium` / `high`
+- 报告会单独显示手动覆盖字段和来源说明
+
 手动命令：
 
 ```bash

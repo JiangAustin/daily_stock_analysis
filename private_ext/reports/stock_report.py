@@ -38,6 +38,10 @@ def render_stock_report(
     source_cache_notice = ""
     if quality.get("source_cache_used"):
         source_cache_notice = "\n> 本报告部分字段使用本地缓存数据，可能不是最新实时数据。\n"
+    manual_override_notice = ""
+    manual_override_data = quality.get("manual_override") or {}
+    if manual_override_data.get("applied_fields"):
+        manual_override_notice = "\n> 本报告包含手动覆盖字段，已在下方单独列示，请优先核对来源说明与更新时间。\n"
     actual_date_notice = ""
     requested_date = quality.get("requested_date", fact_pack.trade_date)
     actual_date = quality.get("actual_data_date")
@@ -50,6 +54,7 @@ def render_stock_report(
 > {DISCLAIMER}
 {degraded_notice}
 {source_cache_notice}
+{manual_override_notice}
 {actual_date_notice}
 
 ## 1. 结论摘要
@@ -134,6 +139,9 @@ def render_stock_report(
 
 ### 2.8 数据缺失与质量警告
 {bullet_list([*fact_pack.missing_fields, *fact_pack.data_quality_warnings])}
+
+### 手动覆盖字段
+{_render_manual_override_table(quality)}
 
 ## 3. 分项评分
 
@@ -282,4 +290,31 @@ def _render_eastmoney_diagnostics(quality: dict[str, object]) -> str:
             )
         lines.append("")
         lines.append("> 完整 candidate 结果见 RawStockData metadata。")
+    return "\n".join(lines)
+
+
+def _render_manual_override_table(quality: dict[str, object]) -> str:
+    manual_override = quality.get("manual_override") or quality.get("provider_reports", {}).get("manual_override", {})
+    if not isinstance(manual_override, dict):
+        return "- 无"
+    applied_records = manual_override.get("applied_records", [])
+    if not applied_records:
+        return "- 无"
+    lines = [
+        "| 字段 | 值 | 动作 | 允许覆盖 | 置信度 | 来源说明 | 更新时间 | 来源 URL |",
+        "|---|---:|---|---|---|---|---|---|",
+    ]
+    for item in applied_records:
+        lines.append(
+            "| {field} | {value} | {action} | {allow_override} | {confidence} | {source_note} | {updated_at} | {source_url} |".format(
+                field=item.get("field", "-"),
+                value=item.get("value", "-"),
+                action=item.get("action", "-"),
+                allow_override="yes" if item.get("allow_override") else "no",
+                confidence=item.get("confidence", "-"),
+                source_note=item.get("source_note", "-") or "-",
+                updated_at=item.get("updated_at", "-") or "-",
+                source_url=item.get("source_url", "-") or "-",
+            )
+        )
     return "\n".join(lines)

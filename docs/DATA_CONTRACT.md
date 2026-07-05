@@ -40,6 +40,10 @@
 - `metadata.merge_warnings` 用于保留 composite 场景下的字段冲突，例如 `provider_value_conflict:market_snapshot.close`。
 - `metadata.eastmoney_diagnostics` 用于保留 EastMoney endpoint/group/candidate 级探测结果。
 - `metadata.quality_report.diagnostics` 用于把 EastMoney diagnostics 透传到 health check、composite provider report 和报告层。
+- `metadata.manual_override` 用于保留手动 CSV/JSON 覆盖记录、已应用字段、跳过字段、来源说明、更新时间和允许覆盖标记。
+- `metadata.quality_report.manual_override` 用于把手动覆盖审计信息透传到 health check 与报告层。
+- 手动覆盖文件采用扁平结构，字段必须是已有契约路径，例如 `market_snapshot.close`、`valuation_raw.pe`、`financial_raw.roe`。
+- 默认只补缺失字段；仅当 `allow_override=true` 时，手动值才允许覆盖已有 live/composite 字段。
 - `market_snapshot.close`、`market_snapshot.pct_change`、`kline_summary.return_20d` 属于行情核心字段。
 - `requested_date` 与 `actual_data_date` 允许不一致；真实 Provider 不得假设请求日一定可交易或一定可查。
 - `metadata.run_mode`、`metadata.file_run_id`、`metadata.run_dir` 用于保留文件系统级运行证据，不依赖 SQLite 自增 id。

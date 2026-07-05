@@ -103,10 +103,12 @@ class FactPackBuilder:
                 "failed_sources": quality_report.get("failed_sources", []),
                 "successful_sources": quality_report.get("successful_sources", []),
                 "field_provenance": metadata.get("field_provenance", {}),
+                "manual_override": metadata.get("manual_override", {}),
                 "source_cache_used": metadata.get("source_cache_used", []),
                 "live_success_count": quality_report.get("live_success_count", 0),
                 "cache_success_count": quality_report.get("cache_success_count", 0),
                 "live_failure_count": quality_report.get("live_failure_count", 0),
                 "critical_field_status": quality_report.get("critical_field_status", {}),
+                "provider_reports": metadata.get("provider_reports", {}),
             },
         )

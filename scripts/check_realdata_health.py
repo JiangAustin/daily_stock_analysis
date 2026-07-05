@@ -14,8 +14,8 @@ if str(ROOT) not in sys.path:
 from private_ext.raw_data import AkShareNotInstalledError, create_raw_data_collector
 
 
-def main() -> int:
-    args = parse_args()
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
     try:
         collector = create_raw_data_collector(
             args.raw_data,
@@ -76,7 +76,7 @@ def main() -> int:
     return 0
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Check raw-data provider health without running reports.")
     parser.add_argument("--stocks", default="600519,000001,300750")
     parser.add_argument("--date", default="2026-07-03")
@@ -87,7 +87,7 @@ def parse_args() -> argparse.Namespace:
         help="Force live fetch for this check and disable cache fallback.",
     )
     parser.add_argument("--verbose", action="store_true")
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def _print_table(rows: list[dict[str, str]]) -> None:
@@ -124,6 +124,10 @@ def _print_verbose(symbol: str, quality: dict[str, object]) -> None:
     print("cache_success_count:", quality.get("cache_success_count", 0))
     print("live_failure_count:", quality.get("live_failure_count", 0))
     print("failed_sources:", ",".join(quality.get("failed_sources", [])) or "-")
+    manual_override = quality.get("manual_override") or quality.get("provider_reports", {}).get("manual_override", {})
+    if manual_override:
+        print("manual_override:")
+        print(json.dumps(manual_override, ensure_ascii=False, indent=2, sort_keys=True))
     print("field_provenance_summary:")
     print(
         json.dumps(

@@ -27,14 +27,27 @@ def build_field_provenance(
     fallback_level: int,
     is_cached: bool,
     confidence: str,
+    source_note: str | None = None,
+    source_url: str | None = None,
+    updated_at: str | None = None,
+    allow_override: bool | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload = {
         "source": source,
         "candidate": candidate,
         "fallback_level": fallback_level,
         "is_cached": is_cached,
         "confidence": confidence,
     }
+    if source_note is not None:
+        payload["source_note"] = source_note
+    if source_url is not None:
+        payload["source_url"] = source_url
+    if updated_at is not None:
+        payload["updated_at"] = updated_at
+    if allow_override is not None:
+        payload["allow_override"] = allow_override
+    return payload
 
 
 def fill_market_snapshot(
