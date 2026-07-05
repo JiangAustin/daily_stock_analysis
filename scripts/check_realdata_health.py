@@ -53,6 +53,7 @@ def main() -> int:
             {
                 "symbol": raw.symbol,
                 "provider": quality.get("provider", args.raw_data),
+                "providers_used": ",".join(raw.metadata.get("providers_used", [])) or quality.get("provider", args.raw_data),
                 "quality_level": str(quality.get("quality_level", "unknown")),
                 "coverage": str(quality.get("field_coverage_ratio", "")),
                 "close": _format_value((raw.market_snapshot or {}).get("close")),
@@ -95,6 +96,7 @@ def _print_table(rows: list[dict[str, str]]) -> None:
         "return_20d",
         "can_make_decision",
         "provider",
+        "providers_used",
         "can_score",
         "failed_sources",
         "missing_fields",
@@ -107,6 +109,10 @@ def _print_table(rows: list[dict[str, str]]) -> None:
 
 def _print_verbose(symbol: str, quality: dict[str, object]) -> None:
     print(f"\n[{symbol}] verbose quality detail")
+    print("providers_used:", ",".join(quality.get("providers_used", [])) or "-")
+    print("provider_reports:")
+    print(json.dumps(quality.get("provider_reports", {}), ensure_ascii=False, indent=2, sort_keys=True))
+    print("merge_warnings:", ",".join(quality.get("merge_warnings", [])) or "-")
     print("critical_field_status:")
     print(json.dumps(quality.get("critical_field_status", {}), ensure_ascii=False, indent=2, sort_keys=True))
     print("source_cache_used:", ",".join(quality.get("source_cache_used", [])) or "-")
@@ -123,6 +129,42 @@ def _print_verbose(symbol: str, quality: dict[str, object]) -> None:
             sort_keys=True,
         )
     )
+    diagnostics = (
+        quality.get("diagnostics")
+        or quality.get("provider_reports", {}).get("eastmoney", {}).get("diagnostics", {})
+    )
+    if diagnostics:
+        print("EastMoney Endpoint Diagnostics:")
+        for item in diagnostics.get("endpoint_results", []):
+            print(
+                "{endpoint}: {status} fields_found={fields_found} fields_missing={fields_missing} error_type={error_type} used_cache={used_cache} elapsed_ms={elapsed_ms}".format(
+                    endpoint=item.get("endpoint_name"),
+                    status=item.get("status"),
+                    fields_found=item.get("fields_found", []),
+                    fields_missing=item.get("fields_missing", []),
+                    error_type=item.get("error_type") or "-",
+                    used_cache=item.get("used_cache"),
+                    elapsed_ms=item.get("elapsed_ms", 0),
+                )
+            )
+        candidate_results = diagnostics.get("candidate_results", [])
+        if candidate_results:
+            print("EastMoney Candidate Diagnostics:")
+            print("| group | candidate | status | fields_found | fields_missing | error_type | used_cache | elapsed_ms |")
+            print("|---|---|---|---|---|---|---|---|")
+            for item in candidate_results:
+                print(
+                    "| {group} | {candidate} | {status} | {fields_found} | {fields_missing} | {error_type} | {used_cache} | {elapsed_ms} |".format(
+                        group=item.get("endpoint_group", "-"),
+                        candidate=item.get("candidate_name", "-"),
+                        status=item.get("status", "-"),
+                        fields_found=",".join(item.get("fields_found", [])) or "-",
+                        fields_missing=",".join(item.get("fields_missing", [])) or "-",
+                        error_type=item.get("error_type") or "-",
+                        used_cache=item.get("used_cache"),
+                        elapsed_ms=item.get("elapsed_ms", 0),
+                    )
+                )
 
 
 def _format_value(value: object) -> str:

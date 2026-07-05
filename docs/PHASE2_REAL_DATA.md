@@ -2,6 +2,18 @@
 
 Phase 2 只接真实 Raw Data，不接真实 LLM。
 
+Phase 2.4 新增第二 Provider `eastmoney`，并通过 `composite` 做字段级合并：
+
+```text
+akshare
+  +
+eastmoney
+  ->
+CompositeRawDataCollector
+  ->
+RawStockData
+```
+
 默认验收仍以 mock acceptance 为准。
 
 运行产物隔离：
@@ -57,6 +69,12 @@ pip install -r requirements-realdata.txt
 python scripts/run_realdata_smoke.py
 ```
 
+组合 provider smoke：
+
+```bash
+python scripts/run_realdata_smoke.py --raw-data composite
+```
+
 手动命令：
 
 ```bash
@@ -73,6 +91,12 @@ python scripts/check_realdata_health.py --stocks 600519,000001,300750 --raw-data
 
 ```bash
 python scripts/check_realdata_health.py --stocks 600519,000001,300750 --raw-data akshare --verbose
+```
+
+组合 provider 健康检查：
+
+```bash
+python scripts/check_realdata_health.py --stocks 600519,000001,300750 --raw-data composite --verbose
 ```
 
 强制实时刷新：
@@ -103,6 +127,22 @@ python scripts/check_realdata_health.py --stocks 600519,000001,300750 --raw-data
 
 - 报告会输出 `关键字段来源` 表，展示关键字段来自 live source、source cache 还是 final raw cache
 - 当前重点跟踪：`close`、`pct_change`、`pe`、`pb`、`roe`、`net_profit_growth`、`return_20d`
+- `composite` 模式下还会输出 `Providers Used` 和 `Merge Warnings`
+- `eastmoney` provider 会记录 endpoint 级 diagnostics，展示每个 endpoint 的状态、命中字段、错误类型、是否使用 source cache 和耗时
+- Phase 2.4.2 新增 candidate 机制：每个 endpoint group 可以有多个 candidate，按 priority 顺序尝试，记录 candidate 级状态、URL/参数摘要、解析结果和 cache 使用情况
+
+EastMoney endpoint probe：
+
+```bash
+python scripts/probe_eastmoney_endpoints.py --stocks 600519,000001,300750
+python scripts/probe_eastmoney_endpoints.py --stocks 600519 --group kline --refresh-data --print-json
+```
+
+为什么 probe 不属于 acceptance：
+
+- probe 直接依赖 EastMoney live network
+- 目标是诊断 candidate 连通性，不是验证 Mock MVP 稳定性
+- 即使 probe 全部失败，也不应阻塞默认 mock acceptance
 
 为什么真实数据 smoke 不是默认 acceptance 的一部分：
 

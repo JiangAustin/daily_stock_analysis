@@ -5,36 +5,47 @@ import importlib.util
 import json
 import subprocess
 import sys
+import argparse
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 PYTHON = sys.executable
-COMMAND = [
-    PYTHON,
-    "scripts/run_stock_report.py",
-    "--stocks",
-    "600519",
-    "--date",
-    "2026-07-03",
-    "--raw-data",
-    "akshare",
-    "--research-adapter",
-    "mock",
-    "--paper-trading",
-    "off",
-    "--run-mode",
-    "realdata_smoke",
-    "--print-json-summary",
-]
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run real-data smoke for a single stock.")
+    parser.add_argument("--raw-data", default="akshare", choices=["akshare", "composite", "eastmoney"])
+    parser.add_argument("--stock", default="600519")
+    parser.add_argument("--date", default="2026-07-03")
+    return parser.parse_args()
 
 
 def main() -> int:
-    if importlib.util.find_spec("akshare") is None:
+    args = parse_args()
+    if args.raw_data in {"akshare", "composite"} and importlib.util.find_spec("akshare") is None:
         print("AkShare is not installed. Run: pip install -r requirements-realdata.txt")
         return 1
 
-    result = subprocess.run(COMMAND, cwd=ROOT, check=False, text=True, capture_output=True)
+    command = [
+        PYTHON,
+        "scripts/run_stock_report.py",
+        "--stocks",
+        args.stock,
+        "--date",
+        args.date,
+        "--raw-data",
+        args.raw_data,
+        "--research-adapter",
+        "mock",
+        "--paper-trading",
+        "off",
+        "--run-mode",
+        "realdata_smoke",
+        "--print-json-summary",
+    ]
+
+    result = subprocess.run(command, cwd=ROOT, check=False, text=True, capture_output=True)
     if result.returncode != 0:
         if result.stdout:
             print(result.stdout, end="")
@@ -45,6 +56,7 @@ def main() -> int:
 
     summary = json.loads(result.stdout)
     print("Realdata smoke completed.")
+    print(f"Raw data provider: {args.raw_data}")
     print(f"Run directory: {summary['run_dir']}")
     print(f"Report: {summary['reports'][0] if summary['reports'] else '-'}")
     print(f"Database: {summary['database']}")

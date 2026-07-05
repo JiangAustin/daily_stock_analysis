@@ -18,11 +18,16 @@ Raw Data
 ## 模块边界
 
 - `scripts/run_stock_report.py`：唯一 MVP 验收入口，负责串联 Mock 原始数据、事实包、评分、决策、风控、报告、模拟交易和 SQLite 写入。
-- `private_ext/raw_data/`：原始数据采集接口与实现，当前支持 `mock`，并新增 `akshare` 作为 Phase 2 真实 A 股 Raw Data Provider。
+- `private_ext/raw_data/`：原始数据采集接口与实现，当前支持 `mock`、`akshare`、`eastmoney`，以及 `composite` 组合 Provider。
 - `private_ext/raw_data/quality.py`：真实数据质量分级、覆盖率和可决策性判定。
 - `private_ext/raw_data/cache.py`：Provider 级 `raw_cache` 与 source-level cache，用于缓存 `akshare` 原始快照并在 live 失败时回退。
 - `private_ext/raw_data/akshare_fallbacks.py`：关键字段 fallback 和字段来源追踪。
 - `private_ext/raw_data/akshare_kline.py`：K 线 symbol 标准化、多参数 fallback、close/pct_change 提取、收益率计算。
+- `private_ext/raw_data/eastmoney_collector.py`：第二真实数据源 Provider，包含 endpoint candidate 链、retry、source cache 和 diagnostics。
+- `private_ext/raw_data/eastmoney_endpoints.py`：定义 EastMoney endpoint group、candidate、headers、URL 参数摘要和默认请求函数。
+- `private_ext/raw_data/eastmoney_parsers.py`：snapshot / kline / financial parser，负责字段别名映射、K 线收益率计算和 parsed_empty 判定。
+- `private_ext/raw_data/merge.py`：字段级合并规则、冲突阈值和 provenance 合并。
+- `private_ext/raw_data/composite_collector.py`：先收集 `akshare`，再收集 `eastmoney`，最终输出单一 `RawStockData`。
 - `private_ext/fact_pack/`：将 Raw Data 归一化为可评分的事实包。
 - `private_ext/scoring/`：把 Fact Pack 转为 StockScorecard。
 - `private_ext/research/`：研究适配器接口与 Mock 研究输出。当前不接真实 LLM。
@@ -87,6 +92,10 @@ python scripts/run_acceptance.py --strict-env
 - 关键字段必须记录 provenance，报告中需要明确哪些字段来自 live source、source cache 或 final raw cache。
 - 单个 source 失败不应直接拖垮整只股票；优先走 source-level cache 和字段级 fallback，再由质量报告决定是否允许决策。
 - `close`、`pct_change`、`return_20d` 是行情核心字段。`PE/PB`、新闻、资金流缺失不能单独把整体质量压成 `poor`。
+- `composite` Provider 只做字段级合并，不绕过 `RawStockData -> Fact Pack -> Scorecard` 主链路。
+- provider 冲突必须保留 primary，并把 `provider_value_conflict:*` 写入 `merge_warnings`。
+- EastMoney endpoint group 内按 candidate priority 顺序尝试；单个 candidate `parsed_empty` 不算 success，但也不应让主流程崩溃。
+- `scripts/probe_eastmoney_endpoints.py` 只做 EastMoney candidate 探测，不写 research runs，不属于默认 acceptance。
 
 ## 后续阶段边界
 

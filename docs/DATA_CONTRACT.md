@@ -35,6 +35,11 @@
 - `metadata` 中允许包含 `quality_report`，用于描述 `requested_date`、`actual_data_date`、覆盖率、失败数据源和是否允许评分/决策。
 - `metadata.field_provenance` 用于记录关键字段的来源、fallback 层级、是否来自缓存以及置信等级。
 - `metadata.source_cache_used` 用于记录哪些上游 source 使用了 source-level cache。
+- `metadata.providers_used` 用于记录单 provider 或 composite provider 实际参与的上游列表。
+- `metadata.provider_reports` 用于保留 composite 场景下各 provider 的原始质量报告。
+- `metadata.merge_warnings` 用于保留 composite 场景下的字段冲突，例如 `provider_value_conflict:market_snapshot.close`。
+- `metadata.eastmoney_diagnostics` 用于保留 EastMoney endpoint/group/candidate 级探测结果。
+- `metadata.quality_report.diagnostics` 用于把 EastMoney diagnostics 透传到 health check、composite provider report 和报告层。
 - `market_snapshot.close`、`market_snapshot.pct_change`、`kline_summary.return_20d` 属于行情核心字段。
 - `requested_date` 与 `actual_data_date` 允许不一致；真实 Provider 不得假设请求日一定可交易或一定可查。
 - `metadata.run_mode`、`metadata.file_run_id`、`metadata.run_dir` 用于保留文件系统级运行证据，不依赖 SQLite 自增 id。

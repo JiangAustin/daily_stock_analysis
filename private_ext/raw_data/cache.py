@@ -33,12 +33,11 @@ class RawDataCache:
     def source_path_for(self, provider: str, source_name: str, symbol: str, requested_date: str) -> Path:
         return self.root_dir / provider / "source" / source_name / f"{symbol}_{requested_date}.json"
 
-    def read_source(self, provider: str, source_name: str, symbol: str, requested_date: str) -> list[dict[str, Any]] | None:
+    def read_source(self, provider: str, source_name: str, symbol: str, requested_date: str) -> Any:
         path = self.source_path_for(provider, source_name, symbol, requested_date)
         if not path.exists():
             return None
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        return payload if isinstance(payload, list) else None
+        return json.loads(path.read_text(encoding="utf-8"))
 
     def write_source(
         self,
@@ -46,7 +45,7 @@ class RawDataCache:
         source_name: str,
         symbol: str,
         requested_date: str,
-        payload: list[dict[str, Any]],
+        payload: Any,
     ) -> Path:
         path = self.source_path_for(provider, source_name, symbol, requested_date)
         path.parent.mkdir(parents=True, exist_ok=True)
