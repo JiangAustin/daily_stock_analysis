@@ -45,7 +45,7 @@ def test_factory_rejects_unimplemented_a_stock_data_provider():
         create_raw_data_collector("a_stock_data")
 
 
-def test_akshare_collector_maps_fake_payloads_to_raw_stock_data(monkeypatch):
+def test_akshare_collector_maps_fake_payloads_to_raw_stock_data(monkeypatch, tmp_path):
     from private_ext.raw_data.akshare_collector import AkShareRawDataCollector
 
     fake_ak = SimpleNamespace(
@@ -125,7 +125,9 @@ def test_akshare_collector_maps_fake_payloads_to_raw_stock_data(monkeypatch):
     )
     monkeypatch.setattr("private_ext.raw_data.akshare_collector.ak", fake_ak)
 
-    raw = AkShareRawDataCollector().collect("sh600519", "2026-07-03")
+    raw = AkShareRawDataCollector(cache_dir=tmp_path, use_cache=True, refresh=True).collect(
+        "sh600519", "2026-07-03"
+    )
 
     assert isinstance(raw, RawStockData)
     assert raw.symbol == "600519"
@@ -138,7 +140,7 @@ def test_akshare_collector_maps_fake_payloads_to_raw_stock_data(monkeypatch):
     assert raw.metadata["provider"] == "akshare"
 
 
-def test_akshare_collector_gracefully_degrades_when_partial_payloads_are_missing(monkeypatch):
+def test_akshare_collector_gracefully_degrades_when_partial_payloads_are_missing(monkeypatch, tmp_path):
     from private_ext.raw_data.akshare_collector import AkShareRawDataCollector
 
     fake_ak = SimpleNamespace(
@@ -160,7 +162,9 @@ def test_akshare_collector_gracefully_degrades_when_partial_payloads_are_missing
     )
     monkeypatch.setattr("private_ext.raw_data.akshare_collector.ak", fake_ak)
 
-    raw = AkShareRawDataCollector().collect("000001.SZ", "2026-07-03")
+    raw = AkShareRawDataCollector(cache_dir=tmp_path, use_cache=True, refresh=True).collect(
+        "000001.SZ", "2026-07-03"
+    )
     fact_pack = FactPackBuilder().build(raw)
     scorecard = ScoreEngine().score(fact_pack)
 
@@ -233,3 +237,49 @@ def test_akshare_collector_can_fallback_to_cache_when_live_fetch_is_too_poor(mon
     assert raw.market_snapshot["close"] == 1500.0
     assert raw.metadata["loaded_from_cache"] is True
     assert "used_stale_cache_due_to_live_failure" in raw.metadata["data_quality_warnings"]
+
+
+def test_akshare_collector_can_use_source_level_cache_for_partial_recovery(monkeypatch, tmp_path):
+    from private_ext.raw_data.akshare_collector import AkShareRawDataCollector
+    from private_ext.raw_data.cache import RawDataCache
+
+    cache = RawDataCache(tmp_path)
+    cache.write_source(
+        "akshare",
+        "stock_zh_a_hist",
+        "600519",
+        "2026-07-03",
+        [
+            {"日期": "2026-07-01", "收盘": 1490.0},
+            {"日期": "2026-07-02", "收盘": 1500.0},
+            {"日期": "2026-07-03", "收盘": 1502.0},
+        ],
+    )
+
+    fake_ak = SimpleNamespace(
+        stock_individual_info_em=lambda symbol: _FakeFrame(
+            [{"item": "股票简称", "value": "贵州茅台"}, {"item": "行业", "value": "酿酒行业"}]
+        ),
+        stock_zh_a_spot_em=lambda: _FakeFrame([]),
+        stock_zh_a_hist=lambda **kwargs: (_ for _ in ()).throw(RuntimeError("hist down")),
+        stock_financial_analysis_indicator=lambda **kwargs: _FakeFrame(
+            [{"日期": "2026-03-31", "净资产收益率(%)": 27.0, "净利润增长率(%)": 13.5}]
+        ),
+        stock_individual_fund_flow=lambda **kwargs: _FakeFrame([]),
+        stock_hsgt_individual_em=lambda symbol: _FakeFrame([]),
+        stock_lhb_stock_statistic_em=lambda symbol: _FakeFrame([]),
+        stock_news_em=lambda symbol: _FakeFrame([]),
+        stock_research_report_em=lambda symbol: _FakeFrame([]),
+    )
+    monkeypatch.setattr("private_ext.raw_data.akshare_collector.ak", fake_ak)
+
+    collector = AkShareRawDataCollector(cache_dir=tmp_path, use_cache=True, refresh=True)
+    raw = collector.collect("600519", "2026-07-03")
+    quality = raw.metadata["quality_report"]
+
+    assert raw.market_snapshot["close"] == 1502.0
+    assert "used_source_cache:stock_zh_a_hist" in raw.metadata["data_quality_warnings"]
+    assert "stock_zh_a_hist" in raw.metadata["source_cache_used"]
+    assert quality["cache_success_count"] >= 1
+    assert quality["field_provenance_summary"]["market_snapshot.close"]["source"] == "stock_zh_a_hist"
+    assert quality["field_provenance_summary"]["market_snapshot.close"]["is_cached"] is True

@@ -1,5 +1,6 @@
 from private_ext.fact_pack.models import StockFactPack
 from private_ext.scoring.capital_flow import score_capital_flow
+from private_ext.scoring.common import append_provenance
 from private_ext.scoring.financial_health import score_financial_health
 from private_ext.scoring.growth import score_growth
 from private_ext.scoring.models import StockScorecard
@@ -14,6 +15,7 @@ class ScoreEngine:
     def score(self, fact_pack: StockFactPack) -> StockScorecard:
         quality_level = str(fact_pack.metadata.get("quality_level", "good"))
         can_score = bool(fact_pack.metadata.get("can_score", True))
+        field_provenance = fact_pack.metadata.get("field_provenance", {}) or {}
         valuation_score, valuation_explain = score_valuation(fact_pack)
         growth_score, growth_explain = score_growth(fact_pack)
         profitability_score, profitability_explain = score_profitability(fact_pack)
@@ -22,6 +24,46 @@ class ScoreEngine:
         technical_score, technical_explain = score_technical(fact_pack)
         sentiment_score, sentiment_explain = score_sentiment(fact_pack)
         risk_score, risk_explain, penalty_reasons = score_risk(fact_pack)
+        valuation_explain = append_provenance(
+            valuation_explain,
+            field_provenance=field_provenance,
+            fields=["valuation_raw.pe", "valuation_raw.pb"],
+        )
+        growth_explain = append_provenance(
+            growth_explain,
+            field_provenance=field_provenance,
+            fields=["financial_raw.net_profit_growth"],
+        )
+        profitability_explain = append_provenance(
+            profitability_explain,
+            field_provenance=field_provenance,
+            fields=["financial_raw.roe"],
+        )
+        financial_health_explain = append_provenance(
+            financial_health_explain,
+            field_provenance=field_provenance,
+            fields=["financial_raw.roe"],
+        )
+        capital_flow_explain = append_provenance(
+            capital_flow_explain,
+            field_provenance=field_provenance,
+            fields=[],
+        )
+        technical_explain = append_provenance(
+            technical_explain,
+            field_provenance=field_provenance,
+            fields=["kline_summary.return_20d"],
+        )
+        sentiment_explain = append_provenance(
+            sentiment_explain,
+            field_provenance=field_provenance,
+            fields=[],
+        )
+        risk_explain = append_provenance(
+            risk_explain,
+            field_provenance=field_provenance,
+            fields=["market_snapshot.close", "market_snapshot.pct_change"],
+        )
 
         total = (
             valuation_score * 0.15

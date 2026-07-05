@@ -1,8 +1,12 @@
+import pytest
+
 from private_ext.raw_data.akshare_fallbacks import (
     fill_kline_summary,
     fill_market_snapshot,
     fill_valuation,
 )
+
+pytestmark = pytest.mark.private_ext
 
 
 def _safe_float(value):

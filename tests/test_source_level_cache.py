@@ -1,6 +1,9 @@
+import pytest
 from pathlib import Path
 
 from private_ext.raw_data.cache import RawDataCache
+
+pytestmark = pytest.mark.private_ext
 
 
 def test_source_level_cache_roundtrip(tmp_path: Path):

@@ -1,3 +1,4 @@
+import pytest
 from pathlib import Path
 
 from private_ext.decisions.models import InvestmentDecision
@@ -6,6 +7,8 @@ from private_ext.paper_trading.models import PaperTradeExecution
 from private_ext.raw_data.quality import build_quality_report
 from private_ext.reports.stock_report import render_stock_report
 from private_ext.scoring.models import StockScorecard
+
+pytestmark = pytest.mark.private_ext
 
 
 def test_quality_report_keeps_provenance_and_cache_counters():
@@ -149,6 +152,6 @@ def test_report_renderer_includes_key_field_provenance_table(tmp_path: Path):
     content = path.read_text(encoding="utf-8")
 
     assert "### 关键字段来源" in content
-    assert "| market_snapshot.close | stock_zh_a_hist |" in content
+    assert "| market_snapshot.close | 是 | stock_zh_a_hist |" in content
     assert "### 数据源成功/失败统计" in content
     assert "source cache" in content.lower() or "缓存" in content
