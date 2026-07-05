@@ -1,0 +1,4 @@
+# Keep this constraint explicit while evaluating mootdx-based real-data adapters.
+# mootdx 0.11.x requires httpx>=0.25.0,<0.26.0, while the existing app stack
+# may require newer httpx versions through LLM/API dependencies.
+httpx>=0.25.0,<0.26.0
