@@ -103,7 +103,7 @@ def test_eastmoney_collector_retries_then_uses_source_cache_and_records_diagnost
     collector = EastMoneyRawDataCollector(
         cache_dir=tmp_path,
         use_cache=True,
-        refresh=True,
+        refresh=False,
         fetchers={
             "eastmoney_push2_snapshot": failing_snapshot,
             "eastmoney_quote_snapshot_fallback": failing_snapshot,

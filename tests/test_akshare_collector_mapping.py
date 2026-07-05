@@ -175,7 +175,7 @@ def test_akshare_collector_gracefully_degrades_when_partial_payloads_are_missing
     assert any("missing" in reason for reason in scorecard.penalty_reasons)
 
 
-def test_akshare_collector_can_fallback_to_cache_when_live_fetch_is_too_poor(monkeypatch, tmp_path):
+def test_akshare_collector_prefers_high_quality_final_cache_when_not_refreshing(monkeypatch, tmp_path):
     from private_ext.raw_data.akshare_collector import AkShareRawDataCollector
     from private_ext.raw_data.cache import RawDataCache
 
@@ -231,12 +231,12 @@ def test_akshare_collector_can_fallback_to_cache_when_live_fetch_is_too_poor(mon
     )
     monkeypatch.setattr("private_ext.raw_data.akshare_collector.ak", fake_ak)
 
-    collector = AkShareRawDataCollector(cache_dir=tmp_path, use_cache=True, refresh=True)
+    collector = AkShareRawDataCollector(cache_dir=tmp_path, use_cache=True, refresh=False)
     raw = collector.collect("600519", "2026-07-03")
 
     assert raw.market_snapshot["close"] == 1500.0
     assert raw.metadata["loaded_from_cache"] is True
-    assert "used_stale_cache_due_to_live_failure" in raw.metadata["data_quality_warnings"]
+    assert raw.metadata["quality_report"]["quality_level"] == "good"
 
 
 def test_akshare_collector_can_use_source_level_cache_for_partial_recovery(monkeypatch, tmp_path):
@@ -273,7 +273,7 @@ def test_akshare_collector_can_use_source_level_cache_for_partial_recovery(monke
     )
     monkeypatch.setattr("private_ext.raw_data.akshare_collector.ak", fake_ak)
 
-    collector = AkShareRawDataCollector(cache_dir=tmp_path, use_cache=True, refresh=True)
+    collector = AkShareRawDataCollector(cache_dir=tmp_path, use_cache=True, refresh=False)
     raw = collector.collect("600519", "2026-07-03")
     quality = raw.metadata["quality_report"]
 
@@ -283,3 +283,60 @@ def test_akshare_collector_can_use_source_level_cache_for_partial_recovery(monke
     assert quality["cache_success_count"] >= 1
     assert quality["field_provenance_summary"]["market_snapshot.close"]["source"] == "stock_zh_a_hist"
     assert quality["field_provenance_summary"]["market_snapshot.close"]["is_cached"] is True
+
+
+def test_akshare_refresh_mode_skips_final_and_source_cache(monkeypatch, tmp_path):
+    from private_ext.raw_data.akshare_collector import AkShareRawDataCollector
+    from private_ext.raw_data.cache import RawDataCache
+
+    cache = RawDataCache(tmp_path)
+    cache.write_source(
+        "akshare",
+        "stock_zh_a_hist",
+        "600519",
+        "2026-07-03",
+        [{"日期": "2026-07-03", "收盘": 1502.0}],
+    )
+    cache.write(
+        "akshare",
+        "600519",
+        "2026-07-03",
+        RawStockData(
+            symbol="600519",
+            trade_date="2026-07-03",
+            basic_info={"name": "贵州茅台", "industry": "白酒", "market": "cn"},
+            market_snapshot={"close": 1500.0},
+            kline_summary={"return_20d": 4.5},
+            valuation_raw={"pe": 24.0},
+            financial_raw={"roe": 27.0, "net_profit_growth": 14.0},
+            capital_flow_raw={},
+            northbound_raw={},
+            dragon_tiger_raw={},
+            announcements_raw=[],
+            news_raw=[],
+            analyst_raw=[],
+            industry_raw={},
+            metadata={"provider": "akshare"},
+        ),
+    )
+
+    fake_ak = SimpleNamespace(
+        stock_individual_info_em=lambda symbol: (_ for _ in ()).throw(RuntimeError("info down")),
+        stock_zh_a_spot_em=lambda: (_ for _ in ()).throw(RuntimeError("spot down")),
+        stock_zh_a_hist=lambda **kwargs: (_ for _ in ()).throw(RuntimeError("hist down")),
+        stock_financial_analysis_indicator=lambda **kwargs: _FakeFrame([]),
+        stock_individual_fund_flow=lambda **kwargs: _FakeFrame([]),
+        stock_hsgt_individual_em=lambda symbol: _FakeFrame([]),
+        stock_lhb_stock_statistic_em=lambda symbol: _FakeFrame([]),
+        stock_news_em=lambda symbol: _FakeFrame([]),
+        stock_research_report_em=lambda symbol: _FakeFrame([]),
+    )
+    monkeypatch.setattr("private_ext.raw_data.akshare_collector.ak", fake_ak)
+
+    collector = AkShareRawDataCollector(cache_dir=tmp_path, use_cache=True, refresh=True)
+    raw = collector.collect("600519", "2026-07-03")
+
+    assert raw.market_snapshot.get("close") is None
+    assert raw.metadata.get("source_cache_used") == []
+    assert raw.metadata.get("loaded_from_cache") is not True
+    assert "used_source_cache:stock_zh_a_hist" not in raw.metadata["data_quality_warnings"]

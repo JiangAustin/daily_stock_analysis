@@ -201,7 +201,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--raw-data", default=settings.default_raw_data)
     parser.add_argument("--research-adapter", default=settings.default_research_adapter)
     parser.add_argument("--paper-trading", choices=["on", "off"], default="on")
-    parser.add_argument("--refresh-data", action="store_true")
+    parser.add_argument(
+        "--refresh-data",
+        action="store_true",
+        help="Force live fetch for this run and disable cache fallback.",
+    )
     parser.add_argument("--run-mode", choices=["mock_mvp", "realdata_smoke", "manual"])
     parser.add_argument("--print-json-summary", action="store_true")
     return parser.parse_args()
@@ -235,7 +239,7 @@ def _resolve_run_mode(raw_data: str, research_adapter: str, explicit_run_mode: s
         return explicit_run_mode
     if raw_data == "mock" and research_adapter == "mock":
         return "mock_mvp"
-    if raw_data == "akshare":
+    if raw_data in {"akshare", "eastmoney", "composite"}:
         return "realdata_smoke"
     return "manual"
 

@@ -81,7 +81,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--stocks", default="600519,000001,300750")
     parser.add_argument("--date", default="2026-07-03")
     parser.add_argument("--raw-data", default="akshare")
-    parser.add_argument("--refresh-data", action="store_true")
+    parser.add_argument(
+        "--refresh-data",
+        action="store_true",
+        help="Force live fetch for this check and disable cache fallback.",
+    )
     parser.add_argument("--verbose", action="store_true")
     return parser.parse_args()
 

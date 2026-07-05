@@ -44,8 +44,8 @@ RawStockData
 - Provider 缓存在 `storage/raw_cache/{provider}/`
 - Source-level cache 缓存在 `storage/raw_cache/{provider}/source/{source_name}/`
 - 默认真实数据 smoke 优先使用缓存，降低 live network 抖动
-- `--refresh-data` 会强制 live 拉取并覆盖缓存
-- live 失败且缓存存在时会回退缓存，并记录 `used_stale_cache_due_to_live_failure`
+- `--refresh-data` 会强制 live 拉取，并禁止 final raw cache 与 source-level cache 回退
+- 默认模式下 live 失败且缓存存在时会回退缓存，并记录 `used_stale_cache_due_to_live_failure`
 - 单个 source live 失败时，会优先尝试 source-level cache，并在 provenance 中标记 `is_cached=true`
 
 K 线专项回补：

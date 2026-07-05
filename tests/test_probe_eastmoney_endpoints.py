@@ -60,3 +60,13 @@ def test_probe_script_returns_one_when_all_candidates_fail(monkeypatch, capsys):
 
     assert code == 1
     assert '"status": "failed"' in out
+
+
+def test_run_stock_report_resolve_run_mode_defaults():
+    from scripts.run_stock_report import _resolve_run_mode
+
+    assert _resolve_run_mode("mock", "mock", None) == "mock_mvp"
+    assert _resolve_run_mode("akshare", "mock", None) == "realdata_smoke"
+    assert _resolve_run_mode("eastmoney", "mock", None) == "realdata_smoke"
+    assert _resolve_run_mode("composite", "mock", None) == "realdata_smoke"
+    assert _resolve_run_mode("custom", "mock", None) == "manual"

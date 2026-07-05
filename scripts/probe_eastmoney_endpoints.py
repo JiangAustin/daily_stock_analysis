@@ -19,7 +19,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--stocks", default="600519,000001,300750")
     parser.add_argument("--date", default="2026-07-03")
     parser.add_argument("--group", choices=["snapshot", "kline", "valuation", "financial"])
-    parser.add_argument("--refresh-data", action="store_true")
+    parser.add_argument(
+        "--refresh-data",
+        action="store_true",
+        help="Force live endpoint probing and disable cache fallback for this probe.",
+    )
     parser.add_argument("--print-json", action="store_true")
     return parser.parse_args(argv)
 

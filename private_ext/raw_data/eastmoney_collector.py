@@ -216,7 +216,7 @@ class EastMoneyRawDataCollector(RawDataCollector):
         symbol: str,
         trade_date: str,
         group: str | None = None,
-        refresh: bool = False,
+        refresh: bool | None = None,
     ) -> dict[str, Any]:
         normalized_symbol = normalize_a_share_symbol(symbol)
         return self._run_groups(normalized_symbol, trade_date, group_filter=group, refresh=refresh)["diagnostics"].to_metadata()
@@ -277,11 +277,11 @@ class EastMoneyRawDataCollector(RawDataCollector):
                 if last_exc is not None:
                     live_failure_count += 1
                     had_hard_failure = True
-                    cached_payload = None
-                    if self.use_cache and not effective_refresh:
-                        cached_payload = self.cache.read_source(self.provider, candidate.name, normalized_symbol, trade_date)
-                    else:
-                        cached_payload = self.cache.read_source(self.provider, candidate.name, normalized_symbol, trade_date) if self.use_cache else None
+                    cached_payload = (
+                        self.cache.read_source(self.provider, candidate.name, normalized_symbol, trade_date)
+                        if self.use_cache and not effective_refresh
+                        else None
+                    )
                     if cached_payload:
                         parsed = candidate.parser(cached_payload)
                         source_cache_used.append(candidate.name)

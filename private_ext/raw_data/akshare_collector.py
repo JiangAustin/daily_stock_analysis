@@ -75,7 +75,11 @@ class AkShareRawDataCollector(RawDataCollector):
                 payloads[name] = {"error": str(exc)}
                 failed_sources.append(name)
                 live_failure_count += 1
-                cached_source = self.cache.read_source(self.provider, name, normalized_symbol, trade_date) if self.use_cache else None
+                cached_source = (
+                    self.cache.read_source(self.provider, name, normalized_symbol, trade_date)
+                    if self.use_cache and not self.refresh
+                    else None
+                )
                 if cached_source:
                     warnings.append(f"used_source_cache:{name}")
                     source_cache_used.append(name)
@@ -89,7 +93,11 @@ class AkShareRawDataCollector(RawDataCollector):
             records = _to_records(result)
             if not records:
                 warnings.append(f"{name}_empty")
-                cached_source = self.cache.read_source(self.provider, name, normalized_symbol, trade_date) if self.use_cache else None
+                cached_source = (
+                    self.cache.read_source(self.provider, name, normalized_symbol, trade_date)
+                    if self.use_cache and not self.refresh
+                    else None
+                )
                 if cached_source:
                     warnings.append(f"used_source_cache:{name}")
                     source_cache_used.append(name)
@@ -150,7 +158,7 @@ class AkShareRawDataCollector(RawDataCollector):
         latest_northbound = northbound_records[-1] if northbound_records else {}
         latest_dragon = _find_record_by_symbol(dragon_tiger_records, normalized_symbol)
 
-        cached_raw_dump = cached.model_dump(mode="json") if cached is not None else None
+        cached_raw_dump = cached.model_dump(mode="json") if cached is not None and not self.refresh else None
         kline_summary, kline_provenance, kline_warnings = fill_kline_summary(
             hist_records=hist_records,
             source_context=source_context,
@@ -300,7 +308,7 @@ class AkShareRawDataCollector(RawDataCollector):
             news_raw,
             analyst_raw,
         ):
-            if cached is not None:
+            if cached is not None and not self.refresh:
                 return _mark_cache_fallback(cached)
             raise RuntimeError(f"AkShare collector could not fetch any usable data for {normalized_symbol}")
 
@@ -335,7 +343,7 @@ class AkShareRawDataCollector(RawDataCollector):
                 "source_payloads": payloads,
             },
         )
-        if cached is not None and (
+        if cached is not None and not self.refresh and (
             (failed_sources and quality_report.quality_level in {"poor", "failed"})
             or (not successful_sources and quality_report.quality_level in {"poor", "failed"})
             or (not successful_sources and not source_cache_used)

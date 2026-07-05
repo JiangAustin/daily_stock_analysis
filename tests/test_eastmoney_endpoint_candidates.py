@@ -55,7 +55,39 @@ def test_candidate_parsed_empty_does_not_count_as_success(tmp_path):
     assert diagnostics["group_status"]["snapshot"] == "skipped"
 
 
-def test_candidate_live_fail_can_use_candidate_cache(tmp_path):
+def test_candidate_live_fail_can_use_candidate_cache_when_not_refreshing(tmp_path):
+    from private_ext.raw_data.cache import RawDataCache
+    from private_ext.raw_data.eastmoney_collector import EastMoneyRawDataCollector
+
+    cache = RawDataCache(tmp_path)
+    cache.write_source(
+        "eastmoney",
+        "eastmoney_push2_snapshot",
+        "600519",
+        "2026-07-03",
+        [{"f43": 150000, "f170": 125}],
+    )
+
+    def failing_snapshot(symbol):
+        raise RuntimeError("RemoteDisconnected")
+
+    collector = EastMoneyRawDataCollector(
+        cache_dir=tmp_path,
+        use_cache=True,
+        refresh=False,
+        fetchers={"eastmoney_push2_snapshot": failing_snapshot},
+    )
+
+    diagnostics = collector.probe_endpoints("600519", "2026-07-03", group="snapshot")
+
+    result = diagnostics["candidate_results"][0]
+    assert result["status"] == "cache"
+    assert result["used_cache"] is True
+    assert result["candidate_name"] == "eastmoney_push2_snapshot"
+    assert "snapshot" in diagnostics["successful_endpoints"]
+
+
+def test_candidate_refresh_mode_skips_candidate_cache(tmp_path):
     from private_ext.raw_data.cache import RawDataCache
     from private_ext.raw_data.eastmoney_collector import EastMoneyRawDataCollector
 
@@ -81,7 +113,6 @@ def test_candidate_live_fail_can_use_candidate_cache(tmp_path):
     diagnostics = collector.probe_endpoints("600519", "2026-07-03", group="snapshot")
 
     result = diagnostics["candidate_results"][0]
-    assert result["status"] == "cache"
-    assert result["used_cache"] is True
-    assert result["candidate_name"] == "eastmoney_push2_snapshot"
-    assert "snapshot" in diagnostics["successful_endpoints"]
+    assert result["status"] == "failed"
+    assert result["used_cache"] is False
+    assert diagnostics["successful_endpoints"] == []
