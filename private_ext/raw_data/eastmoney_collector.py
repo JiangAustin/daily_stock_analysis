@@ -42,13 +42,14 @@ class EastMoneyRawDataCollector(RawDataCollector):
         failed_sources = context["failed_sources"]
         successful_sources = context["successful_sources"]
         source_cache_used = context["source_cache_used"]
-        group_cache_hit = context["group_cache_hit"]
         source_payloads = context["source_payloads"]
         field_provenance: dict[str, dict[str, Any]] = {}
         live_success_count = context["live_success_count"]
         cache_success_count = context["cache_success_count"]
         live_failure_count = context["live_failure_count"]
         diagnostics: EastMoneyDiagnosticsReport = context["diagnostics"]
+        best_candidate_by_group = diagnostics.best_candidate_by_group
+        cached_candidates = set(source_cache_used)
 
         snapshot_fields = context["group_fields"].get("snapshot", {})
         valuation_fields = context["group_fields"].get("valuation", {})
@@ -130,50 +131,58 @@ class EastMoneyRawDataCollector(RawDataCollector):
 
         field_provenance["market_snapshot.close"] = build_field_provenance(
             source=close_source,
+            candidate=_candidate_name_for_source(close_source, best_candidate_by_group),
             fallback_level=close_fallback_level,
-            is_cached=bool(close_source and group_cache_hit.get(_group_name_for_source(close_source), False)),
+            is_cached=bool(_candidate_name_for_source(close_source, best_candidate_by_group) in cached_candidates),
             confidence="high" if close is not None else "missing",
         )
         field_provenance["market_snapshot.pct_change"] = build_field_provenance(
             source=pct_change_source,
+            candidate=_candidate_name_for_source(pct_change_source, best_candidate_by_group),
             fallback_level=pct_change_fallback_level,
-            is_cached=bool(pct_change_source and group_cache_hit.get(_group_name_for_source(pct_change_source), False)),
+            is_cached=bool(_candidate_name_for_source(pct_change_source, best_candidate_by_group) in cached_candidates),
             confidence="high" if pct_change is not None else "missing",
         )
         field_provenance["market_snapshot.turnover_rate"] = build_field_provenance(
             source=turnover_rate_source,
+            candidate=_candidate_name_for_source(turnover_rate_source, best_candidate_by_group),
             fallback_level=turnover_rate_fallback_level,
-            is_cached=bool(turnover_rate_source and group_cache_hit.get(_group_name_for_source(turnover_rate_source), False)),
+            is_cached=bool(_candidate_name_for_source(turnover_rate_source, best_candidate_by_group) in cached_candidates),
             confidence="high" if turnover_rate is not None else "missing",
         )
         field_provenance["market_snapshot.market_cap"] = build_field_provenance(
             source=market_cap_source,
+            candidate=_candidate_name_for_source(market_cap_source, best_candidate_by_group),
             fallback_level=market_cap_fallback_level,
-            is_cached=bool(market_cap_source and group_cache_hit.get(_group_name_for_source(market_cap_source), False)),
+            is_cached=bool(_candidate_name_for_source(market_cap_source, best_candidate_by_group) in cached_candidates),
             confidence="high" if market_cap is not None else "missing",
         )
         field_provenance["valuation_raw.pe"] = build_field_provenance(
             source=pe_source,
+            candidate=_candidate_name_for_source(pe_source, best_candidate_by_group),
             fallback_level=pe_fallback_level,
-            is_cached=bool(pe_source and group_cache_hit.get(_group_name_for_source(pe_source), False)),
+            is_cached=bool(_candidate_name_for_source(pe_source, best_candidate_by_group) in cached_candidates),
             confidence="high" if pe is not None else "missing",
         )
         field_provenance["valuation_raw.pb"] = build_field_provenance(
             source=pb_source,
+            candidate=_candidate_name_for_source(pb_source, best_candidate_by_group),
             fallback_level=pb_fallback_level,
-            is_cached=bool(pb_source and group_cache_hit.get(_group_name_for_source(pb_source), False)),
+            is_cached=bool(_candidate_name_for_source(pb_source, best_candidate_by_group) in cached_candidates),
             confidence="high" if pb is not None else "missing",
         )
         field_provenance["financial_raw.roe"] = build_field_provenance(
             source=roe_source,
+            candidate=_candidate_name_for_source(roe_source, best_candidate_by_group),
             fallback_level=roe_fallback_level,
-            is_cached=bool(roe_source and group_cache_hit.get(_group_name_for_source(roe_source), False)),
+            is_cached=bool(_candidate_name_for_source(roe_source, best_candidate_by_group) in cached_candidates),
             confidence="high" if roe is not None else "missing",
         )
         field_provenance["financial_raw.net_profit_growth"] = build_field_provenance(
             source=net_profit_growth_source,
+            candidate=_candidate_name_for_source(net_profit_growth_source, best_candidate_by_group),
             fallback_level=net_profit_growth_fallback_level,
-            is_cached=bool(net_profit_growth_source and group_cache_hit.get(_group_name_for_source(net_profit_growth_source), False)),
+            is_cached=bool(_candidate_name_for_source(net_profit_growth_source, best_candidate_by_group) in cached_candidates),
             confidence="high" if net_profit_growth is not None else "missing",
         )
         kline_source_map = {
@@ -184,8 +193,9 @@ class EastMoneyRawDataCollector(RawDataCollector):
         for key, (source, fallback_level, value) in kline_source_map.items():
             field_provenance[f"kline_summary.{key}"] = build_field_provenance(
                 source=source,
+                candidate=_candidate_name_for_source(source, best_candidate_by_group),
                 fallback_level=fallback_level,
-                is_cached=bool(source and group_cache_hit.get(_group_name_for_source(source), False)),
+                is_cached=bool(_candidate_name_for_source(source, best_candidate_by_group) in cached_candidates),
                 confidence="high" if value is not None else "missing",
             )
         field_provenance = summarize_field_provenance(field_provenance)
@@ -277,7 +287,6 @@ class EastMoneyRawDataCollector(RawDataCollector):
         failed_sources: list[str] = []
         successful_sources: list[str] = []
         source_cache_used: list[str] = []
-        group_cache_hit: dict[str, bool] = {}
         source_payloads: dict[str, Any] = {}
         candidate_results: list[EastMoneyCandidateResult] = []
         endpoint_results: list[EastMoneyEndpointResult] = []
@@ -331,7 +340,6 @@ class EastMoneyRawDataCollector(RawDataCollector):
                         parsed = candidate.parser(cached_payload)
                         source_cache_used.append(candidate.name)
                         cache_success_count += 1
-                        group_cache_hit[group_name] = True
                         group_fields[group_name] = parsed["fields"]
                         if group_name == "kline":
                             kline_rows = parsed.get("rows", [])
@@ -387,7 +395,6 @@ class EastMoneyRawDataCollector(RawDataCollector):
                 if parsed["fields_found"]:
                     live_success_count += 1
                     successful_sources.append(group_name)
-                    group_cache_hit[group_name] = False
                     group_fields[group_name] = parsed["fields"]
                     if group_name == "kline":
                         kline_rows = parsed.get("rows", [])
@@ -489,7 +496,6 @@ class EastMoneyRawDataCollector(RawDataCollector):
             "failed_sources": sorted(set(failed_sources)),
             "successful_sources": sorted(set(successful_sources)),
             "source_cache_used": sorted(set(source_cache_used)),
-            "group_cache_hit": group_cache_hit,
             "source_payloads": source_payloads,
             "live_success_count": live_success_count,
             "cache_success_count": cache_success_count,
@@ -522,13 +528,17 @@ def first_non_missing_with_source(*values: tuple[str, Any, int]) -> tuple[Any, s
     return None, None, 0
 
 
-def _group_name_for_source(source: str) -> str:
-    if source in {"eastmoney_snapshot", "eastmoney_kline"}:
-        return "snapshot" if source == "eastmoney_snapshot" else "kline"
+def _candidate_name_for_source(source: str | None, best_candidate_by_group: dict[str, str]) -> str | None:
+    if source is None:
+        return None
+    if source == "eastmoney_snapshot":
+        return best_candidate_by_group.get("snapshot")
+    if source == "eastmoney_kline":
+        return best_candidate_by_group.get("kline")
     if source == "eastmoney_valuation":
-        return "valuation"
+        return best_candidate_by_group.get("valuation")
     if source == "eastmoney_financial":
-        return "financial"
+        return best_candidate_by_group.get("financial")
     return source
 
 

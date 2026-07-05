@@ -1,6 +1,9 @@
 name: private-ext-ci
 
 on:
+  push:
+    branches:
+      - private-research-os-core
   pull_request:
     paths:
       - 'private_ext/**'

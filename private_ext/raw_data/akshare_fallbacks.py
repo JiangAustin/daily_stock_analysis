@@ -23,12 +23,14 @@ KEY_FIELDS = [
 def build_field_provenance(
     *,
     source: str | None,
+    candidate: str | None = None,
     fallback_level: int,
     is_cached: bool,
     confidence: str,
 ) -> dict[str, Any]:
     return {
         "source": source,
+        "candidate": candidate,
         "fallback_level": fallback_level,
         "is_cached": is_cached,
         "confidence": confidence,
@@ -393,4 +395,3 @@ def first_available_value(candidates: list[Any]) -> Any:
         if value not in (None, "", [], {}):
             return value
     return None
-

@@ -39,12 +39,14 @@ def _raw(
             "field_provenance": {
                 "market_snapshot.close": {
                     "source": f"{provider}_snapshot",
+                    "candidate": f"{provider}_snapshot",
                     "fallback_level": 0,
                     "is_cached": False,
                     "confidence": "high" if close is not None else "missing",
                 },
                 "kline_summary.return_20d": {
                     "source": f"{provider}_kline",
+                    "candidate": f"{provider}_kline",
                     "fallback_level": 0,
                     "is_cached": False,
                     "confidence": "high" if return_20d is not None else "missing",
@@ -131,7 +133,9 @@ def test_composite_collector_merges_primary_and_secondary():
     assert "diagnostics" in raw.metadata["provider_reports"]["eastmoney"]
     assert raw.metadata["quality_report"]["provider_reports"]["eastmoney"]["diagnostics"]["successful_endpoints"] == ["snapshot"]
     assert raw.metadata["field_provenance"]["market_snapshot.close"]["source"] == "akshare_snapshot"
+    assert raw.metadata["field_provenance"]["market_snapshot.close"]["candidate"] == "akshare_snapshot"
     assert raw.metadata["field_provenance"]["kline_summary.return_20d"]["source"] == "eastmoney_kline"
+    assert raw.metadata["field_provenance"]["kline_summary.return_20d"]["candidate"] == "eastmoney_kline"
 
 
 def test_factory_creates_eastmoney_and_composite_collectors():

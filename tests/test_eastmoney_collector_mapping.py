@@ -90,7 +90,7 @@ def test_eastmoney_collector_uses_kline_for_zero_pct_change_and_records_provenan
         use_cache=False,
         refresh=True,
         fetchers={
-            "snapshot": lambda symbol: [{"f57": "600519", "f58": "贵州茅台"}],
+            "snapshot": lambda symbol: [{"f57": "600519", "f58": "贵州茅台", "f170": 0}],
             "valuation": lambda symbol: [],
             "kline": lambda symbol, trade_date: [
                 {"date": "2026-06-30", "close": 10.0},
@@ -108,9 +108,44 @@ def test_eastmoney_collector_uses_kline_for_zero_pct_change_and_records_provenan
     provenance = raw.metadata["field_provenance"]
 
     assert raw.market_snapshot["pct_change"] == 0.0
-    assert provenance["market_snapshot.pct_change"]["source"] == "eastmoney_kline"
+    assert "pct_change" not in raw.metadata["eastmoney_diagnostics"]["unresolved_fields"]
+    assert provenance["market_snapshot.pct_change"]["source"] == "eastmoney_snapshot"
+    assert provenance["market_snapshot.pct_change"]["candidate"] == "eastmoney_push2_snapshot"
     assert provenance["market_snapshot.pct_change"]["is_cached"] is False
     assert raw.kline_summary["return_20d"] is None
+
+
+def test_eastmoney_collector_marks_kline_fallback_provenance_with_candidate(tmp_path):
+    from private_ext.raw_data.eastmoney_collector import EastMoneyRawDataCollector
+
+    collector = EastMoneyRawDataCollector(
+        cache_dir=tmp_path,
+        use_cache=False,
+        refresh=True,
+        fetchers={
+            "snapshot": lambda symbol: [{"f57": "600519", "f58": "贵州茅台"}],
+            "valuation": lambda symbol: [],
+            "kline": lambda symbol, trade_date: [
+                {"date": "2026-06-30", "close": 10.0},
+                {"date": "2026-07-01", "close": 10.0},
+                {"date": "2026-07-02", "close": 10.0},
+                {"date": "2026-07-03", "close": 10.0},
+                {"date": "2026-07-04", "close": 10.0},
+                {"date": "2026-07-05", "close": 10.0},
+            ],
+            "financial": lambda symbol: [],
+        },
+    )
+
+    raw = collector.collect("600519", "2026-07-03")
+    provenance = raw.metadata["field_provenance"]
+
+    assert raw.market_snapshot["close"] == 10.0
+    assert raw.market_snapshot["pct_change"] == 0.0
+    assert provenance["market_snapshot.close"]["source"] == "eastmoney_kline"
+    assert provenance["market_snapshot.close"]["candidate"] == "eastmoney_push2his_kline"
+    assert provenance["market_snapshot.pct_change"]["source"] == "eastmoney_kline"
+    assert provenance["market_snapshot.pct_change"]["candidate"] == "eastmoney_push2his_kline"
 
 
 def test_eastmoney_collector_retries_then_uses_source_cache_and_records_diagnostics(tmp_path):
@@ -158,6 +193,7 @@ def test_eastmoney_collector_retries_then_uses_source_cache_and_records_diagnost
     assert "eastmoney_push2_snapshot" in diagnostics["cache_used"]
     assert raw.metadata["field_provenance"]["market_snapshot.close"]["is_cached"] is True
     assert raw.metadata["field_provenance"]["market_snapshot.close"]["source"] == "eastmoney_snapshot"
+    assert raw.metadata["field_provenance"]["market_snapshot.close"]["candidate"] == "eastmoney_push2_snapshot"
 
 
 def test_eastmoney_collector_marks_insufficient_kline_window(tmp_path):
